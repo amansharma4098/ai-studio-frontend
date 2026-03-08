@@ -42,7 +42,7 @@ export default function AgentsPage() {
   }
 
   const sendChat = async () => {
-    if (!chatInput.trim() || running || modal?.type !== 'chat') return
+    if (!chatInput.trim() || running || (modal as any)?.type !== 'chat') return
     const agentId = (modal as any).agentId
     const userMsg = chatInput
     setChatInput('')
