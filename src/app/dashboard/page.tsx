@@ -1,11 +1,21 @@
 'use client'
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { agentsApi, monitoringApi, skillsApi, credentialsApi } from '@/lib/api'
+import { useAuthStore } from '@/store/authStore'
 import { Bot, Star, Key, Activity, Zap, ChevronRight } from 'lucide-react'
 
 export default function DashboardPage() {
   const router = useRouter()
+  const { isAuthenticated } = useAuthStore()
+
+  useEffect(() => {
+    const token = localStorage.getItem('token')
+    if (!token && !isAuthenticated()) {
+      router.replace('/login')
+    }
+  }, [])
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: () => agentsApi.list().then(r => r.data) })
   const { data: stats } = useQuery({ queryKey: ['monitoring-stats'], queryFn: () => monitoringApi.stats().then(r => r.data), refetchInterval: 15000 })
   const { data: runs = [] } = useQuery({ queryKey: ['monitoring-runs'], queryFn: () => monitoringApi.runs(8).then(r => r.data), refetchInterval: 10000 })

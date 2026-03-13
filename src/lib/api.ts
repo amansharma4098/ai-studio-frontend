@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://ai-studio-production-4b0f.up.railway.app'
 
 export const api = axios.create({
   baseURL: `${API_URL}/api`,
@@ -10,12 +10,19 @@ export const api = axios.create({
 // Attach JWT token to every request
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
-    const stored = localStorage.getItem('ai-studio-auth')
-    if (stored) {
-      const { state } = JSON.parse(stored)
-      if (state?.token) {
-        config.headers.Authorization = `Bearer ${state.token}`
+    // Check simple token key first, then Zustand persist store
+    let token = localStorage.getItem('token')
+    if (!token) {
+      const stored = localStorage.getItem('ai-studio-auth')
+      if (stored) {
+        try {
+          const { state } = JSON.parse(stored)
+          token = state?.token || null
+        } catch {}
       }
+    }
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
     }
   }
   return config
@@ -26,6 +33,7 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401 && typeof window !== 'undefined') {
+      localStorage.removeItem('token')
       localStorage.removeItem('ai-studio-auth')
       window.location.href = '/login'
     }

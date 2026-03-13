@@ -25,8 +25,9 @@ export default function LoginPage() {
     try {
       const fn = tab === 'login' ? authApi.login(form.email, form.password) : authApi.signup(form)
       const { data } = await fn
+      localStorage.setItem('token', data.access_token)
       setAuth(data.user, data.access_token)
-      router.push('/skills')
+      router.push('/dashboard')
     } catch (e: any) {
       setError(e.response?.data?.detail || 'Authentication failed')
     } finally { setLoading(false) }
