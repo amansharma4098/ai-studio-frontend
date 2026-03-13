@@ -34,13 +34,31 @@ interface Credential {
 // ── Helpers ──────────────────────────────────────────────────────
 function fmtDate(iso: string) {
   if (!iso) return '—'
-  const d = new Date(iso)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  try {
+    const d = new Date(iso)
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  } catch { return '—' }
+}
+
+/** Normalize auth-types response — could be array or object */
+function normalizeAuthTypes(raw: any): AuthType[] {
+  if (!raw) return []
+  if (Array.isArray(raw)) return raw
+  // Object shape: { "HubSpot": { fields: [...] }, "Groq": { fields: [...] } }
+  if (typeof raw === 'object') {
+    return Object.entries(raw).map(([key, value]: [string, any]) => ({
+      id: key,
+      name: value?.name || key,
+      categories: Array.isArray(value?.categories) ? value.categories : (value?.fields ? [{ id: 'default', name: 'Default', fields: Array.isArray(value.fields) ? value.fields : [] }] : []),
+    }))
+  }
+  return []
 }
 
 // ── Main Page ────────────────────────────────────────────────────
 export default function CredentialsPage() {
   const qc = useQueryClient()
+  const [mounted, setMounted] = useState(false)
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
@@ -54,15 +72,24 @@ export default function CredentialsPage() {
   // Selection
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
+  // Mounted guard
+  useEffect(() => { setMounted(true) }, [])
+
   // ── Queries ──────────────────────────────────────────────────
-  const { data: credentials = [], isLoading, refetch } = useQuery<Credential[]>({
+  const { data: rawCredentials, isLoading, refetch } = useQuery({
     queryKey: ['credentials-list'],
-    queryFn: () => credentialsApi.list().then(r => r.data),
+    queryFn: () => credentialsApi.list().then(r => {
+      const d = r.data
+      return Array.isArray(d) ? d : []
+    }),
+    enabled: mounted,
   })
 
-  const filtered = credentials.filter(c => {
+  const credentials: Credential[] = rawCredentials ?? []
+
+  const filtered = (credentials ?? []).filter(c => {
     if (statusFilter === 'all') return true
-    if (statusFilter === 'active') return true // backend can add is_active field
+    if (statusFilter === 'active') return true
     return false
   })
 
@@ -72,8 +99,8 @@ export default function CredentialsPage() {
   })
 
   const toggleAll = () => {
-    if (selected.size === filtered.length) setSelected(new Set())
-    else setSelected(new Set(filtered.map(c => c.id)))
+    if (selected.size === (filtered ?? []).length) setSelected(new Set())
+    else setSelected(new Set((filtered ?? []).map(c => c.id)))
   }
 
   const toggleOne = (id: string) => {
@@ -81,6 +108,8 @@ export default function CredentialsPage() {
     if (next.has(id)) next.delete(id); else next.add(id)
     setSelected(next)
   }
+
+  if (!mounted) return null
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -105,12 +134,14 @@ export default function CredentialsPage() {
           <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
         </div>
         <button
+          type="button"
           onClick={() => setStatusFilter('all')}
           className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 transition-colors"
         >
           Reset
         </button>
         <button
+          type="button"
           onClick={() => refetch()}
           className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 transition-colors flex items-center gap-1.5"
         >
@@ -119,9 +150,10 @@ export default function CredentialsPage() {
 
         <div className="ml-auto flex items-center gap-3">
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-            Credential Details ({filtered.length})
+            Credential Details ({(filtered ?? []).length})
           </span>
           <button
+            type="button"
             onClick={() => { setEditId(null); setAddModal(true) }}
             className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
           >
@@ -139,7 +171,7 @@ export default function CredentialsPage() {
                 <th className="w-10 px-3 py-3">
                   <input
                     type="checkbox"
-                    checked={filtered.length > 0 && selected.size === filtered.length}
+                    checked={(filtered ?? []).length > 0 && selected.size === (filtered ?? []).length}
                     onChange={toggleAll}
                     className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                   />
@@ -163,16 +195,16 @@ export default function CredentialsPage() {
                   </td>
                 </tr>
               )}
-              {!isLoading && filtered.length === 0 && (
+              {!isLoading && (filtered ?? []).length === 0 && (
                 <tr>
                   <td colSpan={9} className="py-16 text-center">
                     <div className="text-4xl mb-2">🔑</div>
                     <p className="text-sm font-medium text-slate-500">No credentials yet</p>
-                    <p className="mt-1 text-xs text-slate-400">Click "Add Credentials" to get started</p>
+                    <p className="mt-1 text-xs text-slate-400">Click &quot;Add Credentials&quot; to get started</p>
                   </td>
                 </tr>
               )}
-              {filtered.map(cred => (
+              {(filtered ?? []).map(cred => (
                 <tr key={cred.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-3 py-3">
                     <input
@@ -184,6 +216,7 @@ export default function CredentialsPage() {
                   </td>
                   <td className="px-2 py-3">
                     <button
+                      type="button"
                       onClick={() => { setEditId(cred.id); setAddModal(true) }}
                       className="p-1 text-slate-400 hover:text-blue-600 transition-colors"
                       title="Edit"
@@ -193,6 +226,7 @@ export default function CredentialsPage() {
                   </td>
                   <td className="px-2 py-3">
                     <button
+                      type="button"
                       onClick={() => setDeleteConfirm(cred.id)}
                       className="p-1 text-slate-400 hover:text-red-500 transition-colors"
                       title="Delete"
@@ -207,6 +241,7 @@ export default function CredentialsPage() {
                   <td className="px-4 py-3 text-slate-500">{fmtDate(cred.modified_at)}</td>
                   <td className="px-4 py-3">
                     <button
+                      type="button"
                       onClick={() => setViewModal(cred.id)}
                       className="text-blue-600 hover:text-blue-700 text-xs font-semibold hover:underline transition-colors"
                     >
@@ -243,12 +278,14 @@ export default function CredentialsPage() {
             <p className="text-sm text-slate-500 mb-5">This action cannot be undone. The credential and its stored values will be permanently removed.</p>
             <div className="flex gap-2">
               <button
+                type="button"
                 onClick={() => setDeleteConfirm(null)}
                 className="flex-1 rounded-lg border border-slate-200 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={() => deleteMut.mutate(deleteConfirm)}
                 disabled={deleteMut.isPending}
                 className="flex-1 rounded-lg bg-red-600 py-2.5 text-sm font-semibold text-white hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
@@ -287,23 +324,30 @@ function AddEditModal({
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({})
   const [fieldsVisible, setFieldsVisible] = useState(false)
+  const [authTypesLoading, setAuthTypesLoading] = useState(true)
 
-  // Fetch auth types on mount
-  const { data: authTypes = [] } = useQuery<AuthType[]>({
+  // Fetch auth types on mount — normalize response shape
+  const { data: rawAuthTypes } = useQuery({
     queryKey: ['auth-types'],
     queryFn: () => credentialsApi.getAuthTypes().then(r => r.data),
   })
 
+  const authTypes: AuthType[] = normalizeAuthTypes(rawAuthTypes)
+
+  useEffect(() => {
+    if (rawAuthTypes !== undefined) setAuthTypesLoading(false)
+  }, [rawAuthTypes])
+
   // Categories for selected auth type
-  const selectedType = authTypes.find(t => t.id === authType)
-  const categories = selectedType?.categories || []
-  const selectedCategory = categories.find(c => c.id === authCategory)
-  const fields: FieldDef[] = selectedCategory?.fields || []
+  const selectedType = (authTypes ?? []).find(t => t.id === authType) ?? null
+  const categories = selectedType?.categories ?? []
+  const selectedCategory = (categories ?? []).find(c => c.id === authCategory) ?? null
+  const fields: FieldDef[] = selectedCategory?.fields ?? []
 
   // Pre-fill on edit
   useEffect(() => {
     if (isEdit && editId) {
-      const cred = credentials.find(c => c.id === editId)
+      const cred = (credentials ?? []).find(c => c.id === editId)
       if (cred) {
         setName(cred.name)
         setAuthType(cred.auth_type)
@@ -330,7 +374,7 @@ function AddEditModal({
 
   // Animate fields in when both type + category selected
   useEffect(() => {
-    if (authType && authCategory && fields.length > 0) {
+    if (authType && authCategory && (fields ?? []).length > 0) {
       const t = setTimeout(() => setFieldsVisible(true), 50)
       return () => clearTimeout(t)
     } else {
@@ -368,132 +412,143 @@ function AddEditModal({
           <h2 className="text-base font-semibold text-slate-800">
             {isEdit ? 'Edit Credential' : 'Add Credentials'}
           </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
             <X size={18} />
           </button>
         </div>
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-          {/* Row 1: Name | Auth Type | Category */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
-                NAME <span className="text-red-500">*</span>
-              </label>
-              <input
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder="e.g. Production API Key"
-                value={name}
-                onChange={e => setName(e.target.value)}
-              />
+          {authTypesLoading ? (
+            <div className="py-10 text-center">
+              <Loader2 size={20} className="mx-auto animate-spin text-slate-400" />
+              <p className="mt-2 text-sm text-slate-400">Loading auth types...</p>
             </div>
-            <div>
-              <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
-                AUTH TYPE <span className="text-red-500">*</span>
-              </label>
-              <select
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                value={authType}
-                onChange={e => setAuthType(e.target.value)}
-              >
-                <option value="">Select auth type...</option>
-                {authTypes.map(t => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
-                AUTHTYPE CATEGORY <span className="text-red-500">*</span>
-              </label>
-              <select
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
-                value={authCategory}
-                onChange={e => setAuthCategory(e.target.value)}
-                disabled={!authType}
-              >
-                <option value="">Select category...</option>
-                {categories.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Row 2: Description */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                DESCRIPTION
-              </label>
-              <span className={`text-[10px] font-medium ${description.length > 255 ? 'text-red-500' : 'text-slate-400'}`}>
-                {description.length}/255
-              </span>
-            </div>
-            <textarea
-              rows={3}
-              maxLength={255}
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 resize-none focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              placeholder="Optional description for this credential..."
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-            />
-          </div>
-
-          {/* Dynamic Fields */}
-          {fields.length > 0 && (
-            <div
-              className="space-y-4 transition-all duration-300 ease-out"
-              style={{
-                opacity: fieldsVisible ? 1 : 0,
-                transform: fieldsVisible ? 'translateY(0)' : 'translateY(8px)',
-              }}
-            >
-              <div className="border-t border-slate-100 pt-4">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">
-                  {selectedType?.name} / {selectedCategory?.name} Fields
-                </p>
-              </div>
-              {fields.map(field => (
-                <div key={field.key}>
+          ) : (
+            <>
+              {/* Row 1: Name | Auth Type | Category */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
-                    {field.label}
-                    {field.required && <span className="text-red-500 ml-0.5">*</span>}
+                    NAME <span className="text-red-500">*</span>
                   </label>
-                  <div className="relative">
-                    <input
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 pr-10"
-                      type={field.type === 'password' && !showPasswords[field.key] ? 'password' : 'text'}
-                      placeholder={field.placeholder || ''}
-                      value={fieldValues[field.key] || ''}
-                      onChange={e => setFieldValues(v => ({ ...v, [field.key]: e.target.value }))}
-                    />
-                    {field.type === 'password' && (
-                      <button
-                        type="button"
-                        onClick={() => togglePasswordVis(field.key)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                      >
-                        {showPasswords[field.key] ? <EyeOff size={14} /> : <Eye size={14} />}
-                      </button>
-                    )}
-                  </div>
+                  <input
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="e.g. Production API Key"
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                  />
                 </div>
-              ))}
-            </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                    AUTH TYPE <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    value={authType}
+                    onChange={e => setAuthType(e.target.value)}
+                  >
+                    <option value="">Select auth type...</option>
+                    {(authTypes ?? []).map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                    AUTHTYPE CATEGORY <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+                    value={authCategory}
+                    onChange={e => setAuthCategory(e.target.value)}
+                    disabled={!authType}
+                  >
+                    <option value="">Select category...</option>
+                    {(categories ?? []).map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Row 2: Description */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    DESCRIPTION
+                  </label>
+                  <span className={`text-[10px] font-medium ${description.length > 255 ? 'text-red-500' : 'text-slate-400'}`}>
+                    {description.length}/255
+                  </span>
+                </div>
+                <textarea
+                  rows={3}
+                  maxLength={255}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 resize-none focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  placeholder="Optional description for this credential..."
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                />
+              </div>
+
+              {/* Dynamic Fields */}
+              {(fields ?? []).length > 0 && (
+                <div
+                  className="space-y-4 transition-all duration-300 ease-out"
+                  style={{
+                    opacity: fieldsVisible ? 1 : 0,
+                    transform: fieldsVisible ? 'translateY(0)' : 'translateY(8px)',
+                  }}
+                >
+                  <div className="border-t border-slate-100 pt-4">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">
+                      {selectedType?.name ?? ''} / {selectedCategory?.name ?? ''} Fields
+                    </p>
+                  </div>
+                  {(fields ?? []).map(field => (
+                    <div key={field.key}>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                        {field.label}
+                        {field.required && <span className="text-red-500 ml-0.5">*</span>}
+                      </label>
+                      <div className="relative">
+                        <input
+                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 pr-10"
+                          type={field.type === 'password' && !showPasswords[field.key] ? 'password' : 'text'}
+                          placeholder={field.placeholder ?? ''}
+                          value={fieldValues[field.key] ?? ''}
+                          onChange={e => setFieldValues(v => ({ ...v, [field.key]: e.target.value }))}
+                        />
+                        {field.type === 'password' && (
+                          <button
+                            type="button"
+                            onClick={() => togglePasswordVis(field.key)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                          >
+                            {showPasswords[field.key] ? <EyeOff size={14} /> : <Eye size={14} />}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
 
         {/* Footer */}
         <div className="flex gap-2 border-t border-slate-200 px-6 py-4">
           <button
+            type="button"
             onClick={onClose}
             className="flex-1 rounded-lg border border-slate-200 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={handleSubmit}
             disabled={saveMut.isPending || !name.trim() || !authType || !authCategory}
             className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
@@ -521,19 +576,21 @@ function ViewModal({ credId, onClose }: { credId: string; onClose: () => void })
 
   const { data: allCreds = [] } = useQuery<Credential[]>({
     queryKey: ['credentials-list'],
-    queryFn: () => credentialsApi.list().then(r => r.data),
+    queryFn: () => credentialsApi.list().then(r => {
+      const d = r.data
+      return Array.isArray(d) ? d : []
+    }),
   })
 
-  const cred = allCreds.find((c: any) => c.id === credId)
+  const cred = (allCreds ?? []).find((c: any) => c.id === credId)
 
   const togglePasswordVis = (key: string) =>
     setShowPasswords(p => ({ ...p, [key]: !p[key] }))
 
   // Separate metadata from secret values
   const metaFields = ['auth_type', 'auth_category', 'description', 'created_by', 'created_at']
-  const secretEntries = credValues
-    ? Object.entries(credValues).filter(([k]) => !metaFields.includes(k) && k !== 'id' && k !== 'name')
-    : []
+  const safeValues = credValues && typeof credValues === 'object' ? credValues : {}
+  const secretEntries = Object.entries(safeValues).filter(([k]) => !metaFields.includes(k) && k !== 'id' && k !== 'name')
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
@@ -544,7 +601,7 @@ function ViewModal({ credId, onClose }: { credId: string; onClose: () => void })
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <h2 className="text-base font-semibold text-slate-800">View Credentials</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
             <X size={18} />
           </button>
         </div>
@@ -561,16 +618,16 @@ function ViewModal({ credId, onClose }: { credId: string; onClose: () => void })
               {/* Info fields */}
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-2.5">
                 {[
-                  ['Name', cred?.name || credValues?.name || '—'],
-                  ['Auth Type', cred?.auth_type || credValues?.auth_type || '—'],
-                  ['Category', cred?.auth_category || credValues?.auth_category || '—'],
-                  ['Description', cred?.description || credValues?.description || '—'],
-                  ['Created By', cred?.created_by || credValues?.created_by || '—'],
+                  ['Name', cred?.name || safeValues?.name || '—'],
+                  ['Auth Type', cred?.auth_type || safeValues?.auth_type || '—'],
+                  ['Category', cred?.auth_category || safeValues?.auth_category || '—'],
+                  ['Description', cred?.description || safeValues?.description || '—'],
+                  ['Created By', cred?.created_by || safeValues?.created_by || '—'],
                   ['Created At', cred?.created_at ? fmtDate(cred.created_at) : '—'],
                 ].map(([label, value]) => (
                   <div key={label as string} className="flex justify-between text-sm py-1 border-b border-slate-200 last:border-0">
                     <span className="text-slate-500">{label}</span>
-                    <span className="font-medium text-slate-800 text-right max-w-[60%] truncate">{value as string}</span>
+                    <span className="font-medium text-slate-800 text-right max-w-[60%] truncate">{(value as string) ?? '—'}</span>
                   </div>
                 ))}
               </div>
@@ -596,7 +653,7 @@ function ViewModal({ credId, onClose }: { credId: string; onClose: () => void })
                             <div className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 font-mono pr-10">
                               {isPassword && !show
                                 ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'
-                                : (val as string) || '—'}
+                                : (val as string) ?? '—'}
                             </div>
                             {isPassword && (
                               <button
@@ -621,6 +678,7 @@ function ViewModal({ credId, onClose }: { credId: string; onClose: () => void })
         {/* Footer */}
         <div className="border-t border-slate-200 px-6 py-4">
           <button
+            type="button"
             onClick={onClose}
             className="w-full rounded-lg border border-slate-200 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
           >
