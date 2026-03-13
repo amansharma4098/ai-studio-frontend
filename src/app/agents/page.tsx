@@ -1,8 +1,9 @@
 'use client'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Bot, Send, Trash2, Loader2, CheckCircle, Sparkles, Zap, AlertTriangle } from 'lucide-react'
+import { Plus, Bot, Send, Trash2, Loader2, CheckCircle, Sparkles, Zap, AlertTriangle, Check } from 'lucide-react'
 import { agentsApi, skillsApi, credentialsApi } from '@/lib/api'
+import Link from 'next/link'
 
 interface SkillBinding { skillId: string; skillName: string; credentialId: string | null }
 
@@ -267,7 +268,7 @@ export default function AgentsPage() {
               )}
               {step === 2 && (
                 <div>
-                  <p className="mb-4 text-sm text-slate-500">Select skills and bind a credential for Microsoft skills.</p>
+                  <p className="mb-4 text-sm text-slate-500">Select skills and bind a credential. Credentials are matched by auth type.</p>
                   {(catalog as any[]).map((cat: any) => (
                     <div key={cat.id} className="mb-5">
                       <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
@@ -278,28 +279,38 @@ export default function AgentsPage() {
                         {cat.tags.flatMap((t: any) => t.skills).slice(0, 8).map((sk: any) => {
                           const isAdded = form.skill_bindings.some(b => b.skillId === sk.id)
                           const binding = form.skill_bindings.find(b => b.skillId === sk.id)
-                          const needsCred = cat.credType === 'azure' || cat.credType === 'entra'
-                          const compatCreds = (credentials as any[]).filter((c: any) => c.credential_type === cat.credType && c.is_verified)
+                          const needsCred = cat.credType && cat.credType !== 'generic'
+                          const compatCreds = (credentials as any[]).filter((c: any) => c.auth_type === cat.credType)
+                          const hasBoundCred = binding?.credentialId && compatCreds.some((c: any) => c.id === binding.credentialId)
                           return (
                             <div key={sk.id} className={`rounded-lg border p-2.5 transition-all ${isAdded ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-slate-300 cursor-pointer'}`}
                               onClick={() => !isAdded && toggleSkill(sk)}>
                               <div className="flex items-center gap-2 mb-1.5">
                                 <span>{sk.icon}</span>
                                 <span className="text-[11.5px] font-semibold text-slate-700 flex-1">{sk.label}</span>
+                                {isAdded && hasBoundCred && (
+                                  <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500">
+                                    <Check size={10} className="text-white" />
+                                  </span>
+                                )}
                                 {isAdded && <button onClick={e => { e.stopPropagation(); toggleSkill(sk) }} className="text-slate-400 hover:text-red-500 text-xs">✕</button>}
                               </div>
                               {isAdded && needsCred && compatCreds.length > 0 && (
                                 <select onClick={e => e.stopPropagation()} className="mt-1 w-full rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 focus:outline-none"
                                   value={binding?.credentialId || ''} onChange={e => bindCred(sk.id, e.target.value)}>
                                   <option value="">Bind credential...</option>
-                                  {compatCreds.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                  {compatCreds.map((c: any) => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.name}{c.auth_category ? ` (${c.auth_category})` : ''}
+                                    </option>
+                                  ))}
                                 </select>
                               )}
                               {isAdded && needsCred && compatCreds.length === 0 && (
-                                <a href={`/credentials?highlight=${cat.credType}`} onClick={e => e.stopPropagation()}
+                                <Link href="/credentials" onClick={e => e.stopPropagation()}
                                   className="mt-1 flex items-center gap-1 text-[10px] font-medium text-amber-600 hover:text-amber-700 transition-colors">
-                                  <AlertTriangle size={10} /> Needs {cat.credType === 'entra' ? 'Entra ID' : cat.credType === 'azure' ? 'Azure' : cat.credType} credential &mdash; Configure &rarr;
-                                </a>
+                                  <AlertTriangle size={10} /> No matching credential &mdash; Add one &rarr;
+                                </Link>
                               )}
                               {isAdded && !needsCred && <span className="text-[10px] text-emerald-600">No auth needed</span>}
                             </div>
