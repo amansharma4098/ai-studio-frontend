@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Pencil, X, Loader2, RefreshCw, Eye, EyeOff, ChevronDown } from 'lucide-react'
 import { credentialsApi } from '@/lib/api'
@@ -521,6 +521,7 @@ function ViewModal({ credId, onClose }: { credId: string; onClose: () => void })
 
   const { data: allCreds = [] } = useQuery<Credential[]>({
     queryKey: ['credentials-list'],
+    queryFn: () => credentialsApi.list().then(r => r.data),
   })
 
   const cred = allCreds.find((c: any) => c.id === credId)
