@@ -1,10 +1,79 @@
 'use client'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Bot, Send, Trash2, Loader2, CheckCircle } from 'lucide-react'
+import { Plus, Bot, Send, Trash2, Loader2, CheckCircle, Sparkles, Zap } from 'lucide-react'
 import { agentsApi, skillsApi, credentialsApi } from '@/lib/api'
 
 interface SkillBinding { skillId: string; skillName: string; credentialId: string | null }
+
+// ── Skill → Prompt Snippet Mapping ──────────────────────────────
+const SKILL_PROMPT_SNIPPETS: Record<string, string> = {
+  web_scraping: 'You can scrape and extract data from websites.',
+  sql_query: 'You can query databases and analyze data.',
+  email: 'You can draft and send emails.',
+  slack: 'You can send messages and notifications via Slack.',
+  rest_api: 'You can call external REST APIs to fetch or send data.',
+  data_analysis: 'You can analyze datasets and generate insights.',
+  entra: 'You can manage Microsoft Entra ID users, groups, and policies.',
+  azure: 'You can manage Azure cloud resources and infrastructure.',
+  devops: 'You can interact with CI/CD pipelines and DevOps tools.',
+}
+
+function generatePromptFromSkills(bindings: SkillBinding[]): string {
+  const seen = new Set<string>()
+  const snippets: string[] = []
+  for (const b of bindings) {
+    const lower = b.skillName.toLowerCase()
+    for (const [key, snippet] of Object.entries(SKILL_PROMPT_SNIPPETS)) {
+      if (lower.includes(key) && !seen.has(key)) {
+        seen.add(key)
+        snippets.push(snippet)
+      }
+    }
+  }
+  if (snippets.length === 0) return 'You are a helpful assistant.'
+  return 'You are a helpful assistant.\n' + snippets.join('\n')
+}
+
+// ── Agent Templates (Quick Start) ───────────────────────────────
+const AGENT_TEMPLATES = [
+  {
+    name: 'Report Analyst',
+    icon: '📊',
+    description: 'Analyzes data and generates structured reports',
+    system_prompt: 'You analyze data and generate structured reports with insights.',
+    model_name: 'llama3',
+    temperature: 0.3,
+    skillPatterns: ['sql_query', 'data_analysis'],
+  },
+  {
+    name: 'Web Researcher',
+    icon: '🔍',
+    description: 'Researches topics online and summarizes findings',
+    system_prompt: 'You research topics online and summarize findings clearly.',
+    model_name: 'mixtral',
+    temperature: 0.5,
+    skillPatterns: ['web_scraping', 'rest_api'],
+  },
+  {
+    name: 'Email Assistant',
+    icon: '✉️',
+    description: 'Drafts professional emails and communications',
+    system_prompt: 'You draft professional emails and communications.',
+    model_name: 'llama3',
+    temperature: 0.7,
+    skillPatterns: ['email'],
+  },
+  {
+    name: 'General Assistant',
+    icon: '🤖',
+    description: 'A helpful assistant for general questions',
+    system_prompt: 'You are a helpful assistant that answers questions.',
+    model_name: 'llama3',
+    temperature: 0.7,
+    skillPatterns: [],
+  },
+]
 
 export default function AgentsPage() {
   const qc = useQueryClient()
@@ -20,6 +89,23 @@ export default function AgentsPage() {
   const { data: credentials = [] } = useQuery({ queryKey: ['credentials'], queryFn: () => credentialsApi.list().then(r => r.data) })
 
   const allSkills = (catalog as any[]).flatMap((c: any) => c.tags.flatMap((t: any) => t.skills.map((s: any) => ({ ...s, catId: c.id, catName: c.name, credType: c.credType }))))
+
+  const applyTemplate = (tpl: typeof AGENT_TEMPLATES[number]) => {
+    const matchedBindings: SkillBinding[] = []
+    for (const pattern of tpl.skillPatterns) {
+      const match = allSkills.find((s: any) => s.name?.toLowerCase().includes(pattern) || s.id?.toLowerCase().includes(pattern))
+      if (match) matchedBindings.push({ skillId: match.id, skillName: match.name, credentialId: null })
+    }
+    setForm({
+      name: tpl.name,
+      description: tpl.description,
+      system_prompt: tpl.system_prompt,
+      model_name: tpl.model_name,
+      temperature: tpl.temperature,
+      memory_enabled: true,
+      skill_bindings: matchedBindings,
+    })
+  }
 
   const createMut = useMutation({
     mutationFn: (data: any) => agentsApi.create(data),
@@ -116,6 +202,27 @@ export default function AgentsPage() {
             <div className="flex-1 overflow-y-auto p-5">
               {step === 1 && (
                 <div className="space-y-4">
+                  {/* Quick Start Templates */}
+                  <div>
+                    <label className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                      <Zap size={11} /> Quick Start
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {AGENT_TEMPLATES.map(tpl => (
+                        <button key={tpl.name} onClick={() => applyTemplate(tpl)}
+                          className="flex items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-left transition-all hover:border-emerald-400 hover:bg-emerald-50 hover:shadow-sm">
+                          <span className="text-xl">{tpl.icon}</span>
+                          <div className="min-w-0">
+                            <p className="text-[12px] font-semibold text-slate-700 truncate">{tpl.name}</p>
+                            <p className="text-[10px] text-slate-500 truncate">{tpl.description}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-100" />
+
                   {[{ k: 'name', l: 'Agent Name', ph: 'Azure Monitor Bot' }, { k: 'description', l: 'Description', ph: 'What does this agent do?' }].map(f => (
                     <div key={f.k}>
                       <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">{f.l}</label>
@@ -124,7 +231,15 @@ export default function AgentsPage() {
                     </div>
                   ))}
                   <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">System Prompt</label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">System Prompt</label>
+                      {form.skill_bindings.length > 0 && (
+                        <button onClick={() => setForm({ ...form, system_prompt: generatePromptFromSkills(form.skill_bindings) })}
+                          className="flex items-center gap-1 rounded-md bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-600 hover:bg-violet-100 transition-colors">
+                          <Sparkles size={10} /> Auto-generate
+                        </button>
+                      )}
+                    </div>
                     <textarea rows={4} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-[12px] text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-none"
                       value={form.system_prompt} onChange={e => setForm({ ...form, system_prompt: e.target.value })} />
                   </div>
@@ -134,6 +249,7 @@ export default function AgentsPage() {
                       <select className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-emerald-500 focus:outline-none"
                         value={form.model_name} onChange={e => setForm({ ...form, model_name: e.target.value })}>
                         <option value="llama3">Llama 3</option>
+                        <option value="mixtral">Mixtral</option>
                         <option value="mistral">Mistral 7B</option>
                         <option value="gemma">Gemma</option>
                       </select>
