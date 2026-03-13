@@ -12,9 +12,12 @@ def hash_password(password: str) -> str:
 
 def verify_password(plain: str, hashed: str) -> bool:
     try:
-        return bcrypt.checkpw(plain.encode('utf-8'), hashed.encode('utf-8'))
+        return bcrypt.checkpw(
+            plain.encode('utf-8'),
+            hashed.encode('utf-8')
+        )
     except Exception as e:
-        print(f"verify_password error: {e}")
+        print(f"[AUTH] verify_password error: {e}")
         return False
 
 def create_access_token(data: dict) -> str:

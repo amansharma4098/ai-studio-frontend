@@ -28,7 +28,7 @@ async def signup(req: SignupRequest, db: AsyncSession = Depends(get_db)):
 
     # Hash password and create user
     hashed = hash_password(req.password)
-    print(f"SIGNUP: email={req.email}, hash prefix={hashed[:30]}")
+    print(f"[AUTH] signup: email={req.email}, hash prefix={hashed[:30]}")
 
     user = User(
         name=req.name,
@@ -53,19 +53,20 @@ async def signup(req: SignupRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login")
 async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
-    # Find user by email
     result = await db.execute(select(User).where(User.email == req.email))
     user = result.scalar_one_or_none()
 
-    print(f"LOGIN: email={req.email}")
-    print(f"LOGIN: user found={user is not None}")
-    print(f"LOGIN: hash={user.password_hash[:30] if user and user.password_hash else 'NONE'}")
+    print(f"[AUTH] login attempt: {req.email}")
+    print(f"[AUTH] user found: {user is not None}")
 
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    print(f"[AUTH] stored hash: {user.password_hash[:30]}")
+    print(f"[AUTH] plain password length: {len(req.password)}")
+
     is_valid = verify_password(req.password, user.password_hash)
-    print(f"LOGIN: verify result={is_valid}")
+    print(f"[AUTH] verify result: {is_valid}")
 
     if not is_valid:
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -77,7 +78,7 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
             "id": str(user.id),
             "name": user.name,
             "email": user.email,
-            "organization": user.organization,
+            "organization": getattr(user, 'organization', ''),
         },
     }
 

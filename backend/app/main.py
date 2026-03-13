@@ -26,6 +26,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount auth router
+# Mount routers
 from backend.app.api.auth import router as auth_router  # noqa: E402
+from backend.app.api.documents import router as documents_router  # noqa: E402
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+app.include_router(documents_router, prefix="/api/documents", tags=["documents"])
