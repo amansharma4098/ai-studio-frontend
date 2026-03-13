@@ -71,7 +71,9 @@ export const skillsApi = {
 // ── Credentials ───────────────────────────────────────────────────
 export const credentialsApi = {
   list: () => api.get('/credentials/'),
+  getTypes: () => api.get('/credentials/types'),
   create: (data: any) => api.post('/credentials/', data),
+  save: (data: any) => api.post('/credentials/save', data),
   verify: (id: string) => api.post(`/credentials/${id}/verify`),
   delete: (id: string) => api.delete(`/credentials/${id}`),
 }

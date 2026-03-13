@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Bot, Send, Trash2, Loader2, CheckCircle, Sparkles, Zap } from 'lucide-react'
+import { Plus, Bot, Send, Trash2, Loader2, CheckCircle, Sparkles, Zap, AlertTriangle } from 'lucide-react'
 import { agentsApi, skillsApi, credentialsApi } from '@/lib/api'
 
 interface SkillBinding { skillId: string; skillName: string; credentialId: string | null }
@@ -288,13 +288,18 @@ export default function AgentsPage() {
                                 <span className="text-[11.5px] font-semibold text-slate-700 flex-1">{sk.label}</span>
                                 {isAdded && <button onClick={e => { e.stopPropagation(); toggleSkill(sk) }} className="text-slate-400 hover:text-red-500 text-xs">✕</button>}
                               </div>
-                              {isAdded && needsCred && (
+                              {isAdded && needsCred && compatCreds.length > 0 && (
                                 <select onClick={e => e.stopPropagation()} className="mt-1 w-full rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 focus:outline-none"
                                   value={binding?.credentialId || ''} onChange={e => bindCred(sk.id, e.target.value)}>
                                   <option value="">Bind credential...</option>
                                   {compatCreds.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                  {compatCreds.length === 0 && <option disabled>No {cat.credType} credential</option>}
                                 </select>
+                              )}
+                              {isAdded && needsCred && compatCreds.length === 0 && (
+                                <a href={`/credentials?highlight=${cat.credType}`} onClick={e => e.stopPropagation()}
+                                  className="mt-1 flex items-center gap-1 text-[10px] font-medium text-amber-600 hover:text-amber-700 transition-colors">
+                                  <AlertTriangle size={10} /> Needs {cat.credType === 'entra' ? 'Entra ID' : cat.credType === 'azure' ? 'Azure' : cat.credType} credential &mdash; Configure &rarr;
+                                </a>
                               )}
                               {isAdded && !needsCred && <span className="text-[10px] text-emerald-600">No auth needed</span>}
                             </div>
