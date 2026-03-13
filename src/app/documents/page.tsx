@@ -47,7 +47,7 @@ export default function DocumentsPage() {
     setSelectedDocs(prev => prev.includes(id) ? prev.filter(d => d !== id) : [...prev, id])
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800">Document AI</h1>
         <p className="mt-1 text-sm text-slate-500">
@@ -55,7 +55,7 @@ export default function DocumentsPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
         {/* Left: Upload + document list */}
         <div className="space-y-4">
           {/* Upload */}

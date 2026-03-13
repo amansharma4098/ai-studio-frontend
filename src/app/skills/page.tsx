@@ -115,7 +115,7 @@ export default function SkillsPage() {
     : SKILL_CATEGORIES
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800">Skills Library</h1>
         <p className="mt-1 text-sm text-slate-500">
@@ -168,7 +168,7 @@ export default function SkillsPage() {
                 {cat.skills.length} {cat.skills.length === 1 ? 'skill' : 'skills'}
               </span>
             </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {cat.skills.map(skill => {
                 const ready = isReady(skill.requiredCredentials)
                 const missingCreds = skill.requiredCredentials.filter(c => !configuredTypes.has(c))

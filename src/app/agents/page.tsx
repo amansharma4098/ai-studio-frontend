@@ -143,7 +143,7 @@ export default function AgentsPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Agents</h1>
@@ -154,7 +154,7 @@ export default function AgentsPage() {
         </button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(agents as any[]).map((agent: any) => (
           <div key={agent.id} className="cursor-pointer rounded-xl border border-slate-200 bg-white p-4 transition-all hover:border-emerald-300 hover:shadow-md"
             onClick={() => { setModal({ type: 'chat', agentId: agent.id }); setChatMsgs([{ role: 'assistant', content: `Hi! I'm ${agent.name}. How can I help you?` }]) }}>
@@ -181,7 +181,7 @@ export default function AgentsPage() {
       {/* Create Agent Modal */}
       {modal === 'create' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-5" onClick={() => setModal(null)}>
-          <div className="flex w-full max-w-2xl flex-col rounded-xl border border-slate-200 bg-white shadow-xl max-h-[90vh]" onClick={e => e.stopPropagation()}>
+          <div className="flex w-full max-w-2xl mx-4 sm:mx-0 flex-col rounded-xl border border-slate-200 bg-white shadow-xl max-h-[95vh] sm:max-h-[90vh]" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-200 p-5">
               <div>
                 <h2 className="text-base font-semibold text-slate-800">Create New Agent</h2>
@@ -274,7 +274,7 @@ export default function AgentsPage() {
                         <span>{cat.icon}</span>{cat.name}
                         <span className="ml-auto text-xs text-emerald-500">{form.skill_bindings.filter(b => allSkills.find(s => s.id === b.skillId)?.catId === cat.id).length} selected</span>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {cat.tags.flatMap((t: any) => t.skills).slice(0, 8).map((sk: any) => {
                           const isAdded = form.skill_bindings.some(b => b.skillId === sk.id)
                           const binding = form.skill_bindings.find(b => b.skillId === sk.id)
@@ -361,7 +361,7 @@ export default function AgentsPage() {
       {/* Chat Modal */}
       {modal && typeof modal === 'object' && modal.type === 'chat' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-5" onClick={() => setModal(null)}>
-          <div className="flex w-full max-w-lg flex-col rounded-xl border border-slate-200 bg-white shadow-xl" style={{ height: '520px' }} onClick={e => e.stopPropagation()}>
+          <div className="flex w-full max-w-lg mx-4 flex-col rounded-xl border border-slate-200 bg-white shadow-xl h-[85vh] sm:h-[520px]" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-3 border-b border-slate-200 p-4">
               <span className="text-2xl">🤖</span>
               <div className="flex-1">

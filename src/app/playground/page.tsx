@@ -31,13 +31,13 @@ export default function PlaygroundPage() {
   })
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800">Playground</h1>
         <p className="mt-1 text-sm text-slate-500">Test prompts directly against Ollama LLMs — no agent overhead</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-5" style={{ minHeight: '580px' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5" style={{ minHeight: '580px' }}>
         {/* Input panel */}
         <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5">
           <div className="grid grid-cols-2 gap-3">

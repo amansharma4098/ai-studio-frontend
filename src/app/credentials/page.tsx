@@ -161,7 +161,7 @@ export default function CredentialsPage() {
   const configuredCount = ALL_TYPES.filter(t => getConfigured(t.id)).length
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800">Credentials</h1>
         <p className="mt-1 text-sm text-slate-500">
@@ -177,7 +177,7 @@ export default function CredentialsPage() {
             <h2 className="text-sm font-semibold text-slate-700">{cat.name}</h2>
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">{cat.types.length}</span>
           </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {cat.types.map(type => {
               const cred = getConfigured(type.id)
               const isHighlighted = highlight === type.id

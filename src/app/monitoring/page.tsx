@@ -18,7 +18,7 @@ export default function MonitoringPage() {
   ]
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Monitoring</h1>
@@ -31,7 +31,7 @@ export default function MonitoringPage() {
       </div>
 
       {/* Stats */}
-      <div className="mb-5 grid grid-cols-4 gap-4">
+      <div className="mb-5 grid grid-cols-2 lg:grid-cols-4 gap-4">
         {STAT_CARDS.map(s => (
           <div key={s.label} className="rounded-xl border border-slate-200 bg-white p-4">
             <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{s.label}</p>

@@ -1,9 +1,10 @@
 'use client'
+import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, Bot, Star, Key, Activity,
-  Terminal, GitBranch, FileText, LogOut, Zap
+  Terminal, GitBranch, FileText, LogOut, Zap, Menu, X
 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 
@@ -38,7 +39,7 @@ const navSections = [
   },
 ]
 
-export function Sidebar() {
+function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
   const pathname = usePathname()
   const router = useRouter()
   const { user, logout } = useAuthStore()
@@ -50,7 +51,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="fixed left-0 top-0 z-50 flex h-screen w-[240px] flex-col" style={{ background: '#1e293b' }}>
+    <>
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 py-5">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500">
@@ -72,6 +73,7 @@ export function Sidebar() {
                 <Link
                   key={item.href}
                   href={item.href}
+                  onClick={onNavClick}
                   className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-all mb-0.5"
                   style={active
                     ? { background: '#10b981', color: '#ffffff' }
@@ -109,6 +111,52 @@ export function Sidebar() {
           </button>
         </div>
       </div>
-    </aside>
+    </>
+  )
+}
+
+export function Sidebar() {
+  const [mobileOpen, setMobileOpen] = useState(false)
+
+  return (
+    <>
+      {/* Mobile top bar */}
+      <div className="fixed left-0 top-0 z-40 flex h-14 w-full items-center justify-between px-4 lg:hidden" style={{ background: '#1e293b' }}>
+        <button onClick={() => setMobileOpen(true)} className="p-1.5 text-white">
+          <Menu size={22} />
+        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500">
+            <Zap size={14} className="text-white" />
+          </div>
+          <span className="text-sm font-bold text-white tracking-tight">AI Studio</span>
+        </div>
+        <div className="w-[34px]" /> {/* Spacer for centering */}
+      </div>
+
+      {/* Mobile drawer overlay */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden" onClick={() => setMobileOpen(false)}>
+          <div className="absolute inset-0 bg-black/50" />
+          <aside
+            className="absolute left-0 top-0 z-50 flex h-full w-72 flex-col"
+            style={{ background: '#1e293b' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex justify-end px-4 pt-4">
+              <button onClick={() => setMobileOpen(false)} className="p-1 text-slate-400 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+            <SidebarContent onNavClick={() => setMobileOpen(false)} />
+          </aside>
+        </div>
+      )}
+
+      {/* Desktop sidebar */}
+      <aside className="fixed left-0 top-0 z-50 hidden h-screen w-[240px] flex-col lg:flex" style={{ background: '#1e293b' }}>
+        <SidebarContent />
+      </aside>
+    </>
   )
 }

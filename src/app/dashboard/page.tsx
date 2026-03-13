@@ -35,7 +35,7 @@ export default function DashboardPage() {
   ]
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
       <div className="mb-7 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Dashboard</h1>
@@ -48,7 +48,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Stat cards */}
-      <div className="mb-6 grid grid-cols-4 gap-4">
+      <div className="mb-6 grid grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map(s => (
           <button key={s.label} onClick={() => router.push(s.href)} className="rounded-xl border border-slate-200 bg-white p-5 text-left transition-all hover:border-emerald-300 hover:shadow-md">
             <div className="mb-3 flex items-center justify-between">
@@ -62,7 +62,7 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-5 mb-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
         {/* Skill Categories */}
         <div className="rounded-xl border border-slate-200 bg-white p-5">
           <div className="mb-4 flex items-center justify-between">
@@ -121,7 +121,7 @@ export default function DashboardPage() {
       {/* Quick Actions */}
       <div className="rounded-xl border border-slate-200 bg-white p-5">
         <h2 className="mb-4 text-sm font-semibold text-slate-800">Quick Start</h2>
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
             { icon: '🏢', title: 'Add Entra Credential', sub: 'Connect Microsoft 365', href: '/credentials' },
             { icon: '☁️', title: 'Add Azure Credential', sub: 'Connect Azure subscription', href: '/credentials' },
