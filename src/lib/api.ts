@@ -62,6 +62,16 @@ export const agentsApi = {
   getRuns: (id: string) => api.get(`/agents/${id}/runs`),
 }
 
+// ── Threads ──────────────────────────────────────────────────────
+export const threadsApi = {
+  listByAgent: (agentId: string) => api.get(`/agents/${agentId}/threads`),
+  create: (agentId: string) => api.post(`/agents/${agentId}/threads`),
+  getMessages: (threadId: string) => api.get(`/threads/${threadId}/messages`),
+  chat: (threadId: string, message: string) =>
+    api.post(`/threads/${threadId}/chat`, { message }),
+  delete: (threadId: string) => api.delete(`/threads/${threadId}`),
+}
+
 // ── Skills ────────────────────────────────────────────────────────
 export const skillsApi = {
   getCatalog: () => api.get('/skills/catalog'),

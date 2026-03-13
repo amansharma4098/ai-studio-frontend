@@ -1,8 +1,8 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Bot, Send, Trash2, Loader2, CheckCircle, Sparkles, Zap, AlertTriangle, Check } from 'lucide-react'
-import { agentsApi, skillsApi, credentialsApi } from '@/lib/api'
+import { Plus, Bot, Send, Trash2, Loader2, CheckCircle, Sparkles, Zap, AlertTriangle, Check, MessageSquare, X } from 'lucide-react'
+import { agentsApi, skillsApi, credentialsApi, threadsApi } from '@/lib/api'
 import Link from 'next/link'
 
 interface SkillBinding { skillId: string; skillName: string; credentialId: string | null }
@@ -84,6 +84,10 @@ export default function AgentsPage() {
   const [chatInput, setChatInput] = useState('')
   const [chatMsgs, setChatMsgs] = useState<{ role: string; content: string }[]>([])
   const [running, setRunning] = useState(false)
+  const [threads, setThreads] = useState<any[]>([])
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
+  const [threadsLoading, setThreadsLoading] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: () => agentsApi.list().then(r => r.data) })
   const { data: catalog = [] } = useQuery({ queryKey: ['skills-catalog'], queryFn: () => skillsApi.getCatalog().then(r => r.data) })
@@ -128,16 +132,111 @@ export default function AgentsPage() {
     setForm({ ...form, skill_bindings: form.skill_bindings.map(b => b.skillId === skillId ? { ...b, credentialId: credId || null } : b) })
   }
 
+  // ── Auto-scroll to bottom on new messages ──
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMsgs, running])
+
+  // ── Fetch threads when chat modal opens ──
+  useEffect(() => {
+    if (!modal || typeof modal !== 'object' || modal.type !== 'chat') return
+    const agentId = modal.agentId
+    setThreadsLoading(true)
+    threadsApi.listByAgent(agentId).then(async (res) => {
+      const list = (res.data || []).sort((a: any, b: any) =>
+        new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime()
+      )
+      if (list.length > 0) {
+        setThreads(list)
+        loadThread(list[0].id)
+      } else {
+        // Auto-create first thread
+        try {
+          const created = await threadsApi.create(agentId)
+          const newThread = created.data
+          setThreads([newThread])
+          loadThread(newThread.id)
+        } catch {
+          setThreads([])
+          setActiveThreadId(null)
+          setChatMsgs([])
+        }
+      }
+    }).catch(() => {
+      setThreads([])
+      setActiveThreadId(null)
+      setChatMsgs([])
+    }).finally(() => setThreadsLoading(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modal && typeof modal === 'object' && modal.type === 'chat' ? modal.agentId : null])
+
+  const loadThread = async (threadId: string) => {
+    setActiveThreadId(threadId)
+    try {
+      const res = await threadsApi.getMessages(threadId)
+      const msgs = (res.data || []).map((m: any) => ({ role: m.role, content: m.content }))
+      setChatMsgs(msgs.length > 0 ? msgs : [])
+    } catch {
+      setChatMsgs([])
+    }
+  }
+
+  const createNewThread = async () => {
+    if (!modal || typeof modal !== 'object' || modal.type !== 'chat') return
+    try {
+      const res = await threadsApi.create(modal.agentId)
+      const newThread = res.data
+      setThreads(prev => [newThread, ...prev])
+      loadThread(newThread.id)
+    } catch {}
+  }
+
+  const deleteThread = async (threadId: string) => {
+    try {
+      await threadsApi.delete(threadId)
+      setThreads(prev => {
+        const updated = prev.filter(t => t.id !== threadId)
+        if (activeThreadId === threadId) {
+          if (updated.length > 0) {
+            loadThread(updated[0].id)
+          } else {
+            setActiveThreadId(null)
+            setChatMsgs([])
+          }
+        }
+        return updated
+      })
+    } catch {}
+  }
+
+  const formatTimeAgo = (dateStr: string) => {
+    const now = Date.now()
+    const then = new Date(dateStr).getTime()
+    const diff = now - then
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1) return 'now'
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h ago`
+    const days = Math.floor(hrs / 24)
+    return `${days}d ago`
+  }
+
   const sendChat = async () => {
-    if (!chatInput.trim() || running || (modal as any)?.type !== 'chat') return
-    const agentId = (modal as any).agentId
+    if (!chatInput.trim() || running || !activeThreadId) return
     const userMsg = chatInput
     setChatInput('')
     setChatMsgs(m => [...m, { role: 'user', content: userMsg }])
     setRunning(true)
     try {
-      const resp = await agentsApi.run(agentId, userMsg)
-      setChatMsgs(m => [...m, { role: 'assistant', content: resp.data.output_text || 'No response' }])
+      const resp = await threadsApi.chat(activeThreadId, userMsg)
+      setChatMsgs(m => [...m, { role: 'assistant', content: resp.data.output_text || resp.data.content || 'No response' }])
+      // Update thread title/timestamp in sidebar
+      setThreads(prev => prev.map(t =>
+        t.id === activeThreadId
+          ? { ...t, title: t.title || userMsg.slice(0, 30), updated_at: new Date().toISOString() }
+          : t
+      ))
     } catch {
       setChatMsgs(m => [...m, { role: 'assistant', content: 'Error: Agent execution failed. Check that Ollama is running.' }])
     } finally { setRunning(false) }
@@ -158,7 +257,7 @@ export default function AgentsPage() {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(agents as any[]).map((agent: any) => (
           <div key={agent.id} className="cursor-pointer rounded-xl border border-slate-200 bg-white p-4 transition-all hover:border-emerald-300 hover:shadow-md"
-            onClick={() => { setModal({ type: 'chat', agentId: agent.id }); setChatMsgs([{ role: 'assistant', content: `Hi! I'm ${agent.name}. How can I help you?` }]) }}>
+            onClick={() => { setModal({ type: 'chat', agentId: agent.id }); setChatMsgs([]); setThreads([]); setActiveThreadId(null) }}>
             <div className="mb-3 flex items-start justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-xl">🤖</div>
@@ -369,41 +468,90 @@ export default function AgentsPage() {
         </div>
       )}
 
-      {/* Chat Modal */}
+      {/* Chat Modal – Two-Panel Layout */}
       {modal && typeof modal === 'object' && modal.type === 'chat' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-5" onClick={() => setModal(null)}>
-          <div className="flex w-full max-w-lg mx-4 flex-col rounded-xl border border-slate-200 bg-white shadow-xl h-[85vh] sm:h-[520px]" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-3 border-b border-slate-200 p-4">
-              <span className="text-2xl">🤖</span>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-slate-800">{(agents as any[]).find((a: any) => a.id === (modal as any).agentId)?.name}</p>
-                <p className="text-[11px] text-slate-500">LangChain ReAct · Ollama</p>
+          <div className="flex w-full max-w-3xl mx-4 rounded-xl border border-slate-200 bg-white shadow-xl h-[85vh]" onClick={e => e.stopPropagation()}>
+            {/* LEFT PANEL – Thread List */}
+            <div className="flex w-48 flex-col border-r border-slate-200 bg-slate-50 rounded-l-xl">
+              <div className="p-3 border-b border-slate-200">
+                <button onClick={createNewThread}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-violet-500 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-600 transition-colors">
+                  <Plus size={12} /> New Chat
+                </button>
               </div>
-              <button onClick={() => setModal(null)} className="text-slate-400 hover:text-slate-600">✕</button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
-              {chatMsgs.map((m, i) => (
-                <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${m.role === 'user' ? 'bg-emerald-500 text-white rounded-br-sm' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-sm font-mono text-[12px]'}`}>
-                    {m.content}
+              <div className="flex-1 overflow-y-auto">
+                {threadsLoading ? (
+                  <div className="flex items-center justify-center p-4">
+                    <Loader2 size={14} className="animate-spin text-slate-400" />
                   </div>
-                </div>
-              ))}
-              {running && (
-                <div className="flex justify-start">
-                  <div className="flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-3.5 py-2.5 text-sm text-slate-500">
-                    <Loader2 size={13} className="animate-spin" /> Executing skills via LangChain...
-                  </div>
-                </div>
-              )}
+                ) : threads.length === 0 ? (
+                  <p className="p-3 text-[11px] text-slate-400 text-center">No threads yet</p>
+                ) : (
+                  threads.map(thread => (
+                    <div key={thread.id}
+                      onClick={() => loadThread(thread.id)}
+                      className={`group flex items-start gap-2 px-3 py-2.5 cursor-pointer transition-colors border-b border-slate-100 ${activeThreadId === thread.id ? 'bg-violet-100 border-violet-200' : 'hover:bg-slate-100'}`}>
+                      <MessageSquare size={12} className={`mt-0.5 shrink-0 ${activeThreadId === thread.id ? 'text-violet-600' : 'text-slate-400'}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-[11px] font-medium truncate ${activeThreadId === thread.id ? 'text-violet-700' : 'text-slate-700'}`}>
+                          {thread.title || 'New chat'}
+                        </p>
+                        <p className="text-[10px] text-slate-400">{formatTimeAgo(thread.updated_at || thread.created_at)}</p>
+                      </div>
+                      <button
+                        onClick={e => { e.stopPropagation(); deleteThread(thread.id) }}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-red-500 transition-all shrink-0">
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
-            <div className="flex gap-2 border-t border-slate-200 p-3">
-              <input className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                placeholder="Ask your agent..." value={chatInput} onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendChat()} />
-              <button onClick={sendChat} disabled={running} className="rounded-lg bg-emerald-500 px-3 text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors">
-                <Send size={14} />
-              </button>
+
+            {/* RIGHT PANEL – Chat Area */}
+            <div className="flex flex-1 flex-col rounded-r-xl">
+              <div className="flex items-center gap-3 border-b border-slate-200 p-4">
+                <span className="text-2xl">🤖</span>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-slate-800">{(agents as any[]).find((a: any) => a.id === (modal as any).agentId)?.name}</p>
+                  <p className="text-[11px] text-slate-500">LangChain ReAct · Ollama</p>
+                </div>
+                <button onClick={() => setModal(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
+                {chatMsgs.length === 0 && !running && (
+                  <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                    <MessageSquare size={28} className="mb-2 opacity-40" />
+                    <p className="text-sm">Start a conversation</p>
+                  </div>
+                )}
+                {chatMsgs.map((m, i) => (
+                  <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${m.role === 'user' ? 'bg-emerald-500 text-white rounded-br-sm' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-sm font-mono text-[12px]'}`}>
+                      {m.content}
+                    </div>
+                  </div>
+                ))}
+                {running && (
+                  <div className="flex justify-start">
+                    <div className="flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-3.5 py-2.5 text-sm text-slate-500">
+                      <Loader2 size={13} className="animate-spin" /> Executing skills via LangChain...
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+              <div className="flex gap-2 border-t border-slate-200 p-3">
+                <input className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  placeholder="Ask your agent..." value={chatInput} onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendChat()}
+                  disabled={!activeThreadId} />
+                <button onClick={sendChat} disabled={running || !activeThreadId} className="rounded-lg bg-emerald-500 px-3 text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors">
+                  <Send size={14} />
+                </button>
+              </div>
             </div>
           </div>
         </div>
