@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Bot, Send, Trash2, Loader2, CheckCircle, Sparkles, Zap, AlertTriangle, Check, MessageSquare, X } from 'lucide-react'
+import { Plus, Bot, Send, Trash2, Loader2, CheckCircle, Sparkles, Zap, AlertTriangle, Check, MessageSquare, X, Pencil } from 'lucide-react'
 import { agentsApi, skillsApi, credentialsApi, threadsApi } from '@/lib/api'
 import Link from 'next/link'
 
@@ -76,6 +76,21 @@ const AGENT_TEMPLATES = [
   },
 ]
 
+// ── Config JSON placeholders per skill type ─────────────────────
+const SKILL_TYPE_PLACEHOLDERS: Record<string, string> = {
+  'REST API': '{"url": "https://api.example.com", "method": "GET", "headers": {}}',
+  'SQL Query': '{"connection": "postgresql://...", "query": "SELECT * FROM table"}',
+  'Python Function': '{"code": "def run(input):\\n    return input.upper()"}',
+  'Web Scraper': '{"url": "https://example.com", "selector": ".content"}',
+}
+
+const SKILL_TYPE_BADGE_COLORS: Record<string, string> = {
+  'REST API': 'bg-blue-100 text-blue-700',
+  'SQL Query': 'bg-amber-100 text-amber-700',
+  'Python Function': 'bg-green-100 text-green-700',
+  'Web Scraper': 'bg-purple-100 text-purple-700',
+}
+
 export default function AgentsPage() {
   const qc = useQueryClient()
   const [modal, setModal] = useState<null | 'create' | { type: 'chat'; agentId: string }>(null)
@@ -88,6 +103,18 @@ export default function AgentsPage() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [threadsLoading, setThreadsLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // ── Edit Agent state ──
+  const [editAgent, setEditAgent] = useState<any>(null)
+  const [editTab, setEditTab] = useState<'general' | 'skills' | 'advanced'>('general')
+  const [editForm, setEditForm] = useState({ name: '', system_prompt: '', model_name: '', temperature: 0.7 })
+  const [agentSkills, setAgentSkills] = useState<any[]>([])
+  const [newSkill, setNewSkill] = useState({ skill_name: '', skill_type: 'REST API', config_json: '' })
+  const [editSaving, setEditSaving] = useState(false)
+  const [editSuccess, setEditSuccess] = useState(false)
+  const [skillAdding, setSkillAdding] = useState(false)
+  const [deleteConfirmAgent, setDeleteConfirmAgent] = useState(false)
+  const [skillDeleteConfirm, setSkillDeleteConfirm] = useState<string | null>(null)
 
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: () => agentsApi.list().then(r => r.data) })
   const { data: catalog = [] } = useQuery({ queryKey: ['skills-catalog'], queryFn: () => skillsApi.getCatalog().then(r => r.data) })
@@ -121,6 +148,84 @@ export default function AgentsPage() {
     mutationFn: agentsApi.delete,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
   })
+
+  // ── Edit Agent handlers ──
+  const openEditModal = async (agentId: string) => {
+    try {
+      const { data } = await agentsApi.get(agentId)
+      setEditAgent(data)
+      setEditForm({
+        name: data.name || '',
+        system_prompt: data.system_prompt || '',
+        model_name: data.model_name || 'llama3',
+        temperature: data.temperature ?? 0.7,
+      })
+      setEditTab('general')
+      setEditSuccess(false)
+      setDeleteConfirmAgent(false)
+      setSkillDeleteConfirm(null)
+      // Fetch skills
+      try {
+        const skillsRes = await agentsApi.getSkills(agentId)
+        setAgentSkills(skillsRes.data || [])
+      } catch {
+        setAgentSkills([])
+      }
+    } catch {}
+  }
+
+  const closeEditModal = () => {
+    setEditAgent(null)
+    setEditSuccess(false)
+    setNewSkill({ skill_name: '', skill_type: 'REST API', config_json: '' })
+  }
+
+  const saveEditForm = async () => {
+    if (!editAgent) return
+    setEditSaving(true)
+    setEditSuccess(false)
+    try {
+      await agentsApi.update(editAgent.id, editForm)
+      setEditSuccess(true)
+      qc.invalidateQueries({ queryKey: ['agents'] })
+      setTimeout(() => setEditSuccess(false), 3000)
+    } catch {}
+    finally { setEditSaving(false) }
+  }
+
+  const addAgentSkill = async () => {
+    if (!editAgent || !newSkill.skill_name.trim()) return
+    setSkillAdding(true)
+    try {
+      await agentsApi.addSkill(editAgent.id, {
+        skill_name: newSkill.skill_name,
+        skill_type: newSkill.skill_type,
+        config_json: newSkill.config_json,
+      })
+      const res = await agentsApi.getSkills(editAgent.id)
+      setAgentSkills(res.data || [])
+      setNewSkill({ skill_name: '', skill_type: 'REST API', config_json: '' })
+    } catch {}
+    finally { setSkillAdding(false) }
+  }
+
+  const removeAgentSkill = async (skillId: string) => {
+    if (!editAgent) return
+    try {
+      await agentsApi.removeSkill(editAgent.id, skillId)
+      setAgentSkills(prev => prev.filter(s => s.id !== skillId))
+      setSkillDeleteConfirm(null)
+    } catch {}
+  }
+
+  const deleteAgentFull = async () => {
+    if (!editAgent) return
+    try {
+      await agentsApi.delete(editAgent.id)
+      qc.invalidateQueries({ queryKey: ['agents'] })
+      closeEditModal()
+    } catch {}
+  }
 
   const toggleSkill = (sk: any) => {
     const exists = form.skill_bindings.find(b => b.skillId === sk.id)
@@ -266,7 +371,10 @@ export default function AgentsPage() {
                   <p className="text-[11px] text-slate-500">{agent.description || 'No description'}</p>
                 </div>
               </div>
-              <button onClick={e => { e.stopPropagation(); deleteMut.mutate(agent.id) }} className="p-1 text-slate-400 hover:text-red-500"><Trash2 size={13} /></button>
+              <div className="flex items-center gap-1">
+                <button onClick={e => { e.stopPropagation(); openEditModal(agent.id) }} className="p-1 text-slate-400 hover:text-violet-600 transition-colors" title="Edit"><Pencil size={13} /></button>
+                <button onClick={e => { e.stopPropagation(); deleteMut.mutate(agent.id) }} className="p-1 text-slate-400 hover:text-red-500 transition-colors" title="Delete"><Trash2 size={13} /></button>
+              </div>
             </div>
             <div className="mb-3 flex gap-1.5 flex-wrap">
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{agent.model_name}</span>
@@ -552,6 +660,191 @@ export default function AgentsPage() {
                   <Send size={14} />
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Edit Agent Modal */}
+      {editAgent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-5" onClick={closeEditModal}>
+          <div className="flex w-full max-w-2xl mx-4 flex-col rounded-xl border border-slate-200 bg-white shadow-xl max-h-[90vh]" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <div>
+                <h2 className="text-base font-semibold text-slate-800">Edit Agent</h2>
+                <p className="text-[11px] text-slate-500 mt-0.5">{editAgent.name}</p>
+              </div>
+              <button onClick={closeEditModal} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={18} /></button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex border-b border-slate-200 px-6">
+              {(['general', 'skills', 'advanced'] as const).map(tab => (
+                <button key={tab} onClick={() => setEditTab(tab)}
+                  className={`px-4 py-3 text-sm font-medium capitalize transition-colors ${editTab === tab ? 'border-b-2 border-violet-600 text-violet-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab content */}
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              {/* ── General Tab ── */}
+              {editTab === 'general' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Agent Name</label>
+                    <input className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                      value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">System Prompt</label>
+                    <textarea className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-[12px] text-slate-800 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 resize-none min-h-[120px]"
+                      rows={5} value={editForm.system_prompt} onChange={e => setEditForm({ ...editForm, system_prompt: e.target.value })} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Model</label>
+                      <select className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-violet-500 focus:outline-none"
+                        value={editForm.model_name} onChange={e => setEditForm({ ...editForm, model_name: e.target.value })}>
+                        <option value="llama3">Llama 3</option>
+                        <option value="mixtral">Mixtral</option>
+                        <option value="mistral">Mistral 7B</option>
+                        <option value="gemma">Gemma</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Temperature ({editForm.temperature})</label>
+                      <input type="range" min="0" max="1" step="0.1" className="w-full mt-2 accent-violet-500" value={editForm.temperature}
+                        onChange={e => setEditForm({ ...editForm, temperature: parseFloat(e.target.value) })} />
+                    </div>
+                  </div>
+                  <button onClick={saveEditForm} disabled={editSaving}
+                    className="w-full rounded-lg bg-violet-600 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                    {editSaving ? <><Loader2 size={13} className="animate-spin" /> Saving...</>
+                      : editSuccess ? <><CheckCircle size={13} /> Saved!</>
+                      : 'Save Changes'}
+                  </button>
+                </div>
+              )}
+
+              {/* ── Skills Tab ── */}
+              {editTab === 'skills' && (
+                <div className="space-y-5">
+                  {/* Installed Skills */}
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                      Installed Skills ({agentSkills.length})
+                    </label>
+                    {agentSkills.length === 0 ? (
+                      <p className="text-sm text-slate-400 py-4 text-center">No skills installed yet</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {agentSkills.map((sk: any) => (
+                          <div key={sk.id} className="bg-gray-50 rounded-lg p-3 flex justify-between items-center">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-sm font-medium text-slate-800">{sk.skill_name || sk.name}</span>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${SKILL_TYPE_BADGE_COLORS[sk.skill_type] || 'bg-slate-100 text-slate-600'}`}>
+                                  {sk.skill_type || 'Custom'}
+                                </span>
+                              </div>
+                              {sk.config_json && (
+                                <p className="text-[11px] text-slate-500 font-mono truncate">
+                                  {(typeof sk.config_json === 'string' ? sk.config_json : JSON.stringify(sk.config_json)).slice(0, 40)}...
+                                </p>
+                              )}
+                            </div>
+                            {skillDeleteConfirm === sk.id ? (
+                              <div className="flex items-center gap-1.5 shrink-0 ml-3">
+                                <button onClick={() => removeAgentSkill(sk.id)}
+                                  className="rounded bg-red-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-red-700 transition-colors">
+                                  Confirm
+                                </button>
+                                <button onClick={() => setSkillDeleteConfirm(null)}
+                                  className="rounded border border-slate-200 px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button onClick={() => setSkillDeleteConfirm(sk.id)}
+                                className="p-1 text-slate-400 hover:text-red-500 transition-colors shrink-0 ml-3">
+                                <X size={14} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Add New Skill */}
+                  <div className="border-t border-slate-200 pt-5">
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">Add New Skill</label>
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Skill Name</label>
+                          <input className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                            placeholder="e.g. Fetch Weather"
+                            value={newSkill.skill_name} onChange={e => setNewSkill({ ...newSkill, skill_name: e.target.value })} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Skill Type</label>
+                          <select className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-violet-500 focus:outline-none"
+                            value={newSkill.skill_type} onChange={e => setNewSkill({ ...newSkill, skill_type: e.target.value, config_json: '' })}>
+                            <option>REST API</option>
+                            <option>SQL Query</option>
+                            <option>Python Function</option>
+                            <option>Web Scraper</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Config JSON</label>
+                        <textarea className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-[12px] text-slate-800 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 resize-none"
+                          rows={4}
+                          placeholder={SKILL_TYPE_PLACEHOLDERS[newSkill.skill_type] || '{}'}
+                          value={newSkill.config_json} onChange={e => setNewSkill({ ...newSkill, config_json: e.target.value })} />
+                      </div>
+                      <button onClick={addAgentSkill} disabled={skillAdding || !newSkill.skill_name.trim()}
+                        className="w-full rounded-lg bg-violet-600 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                        {skillAdding ? <><Loader2 size={13} className="animate-spin" /> Adding...</> : <><Plus size={13} /> Add Skill</>}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Advanced Tab ── */}
+              {editTab === 'advanced' && (
+                <div className="space-y-5">
+                  <div className="border border-red-200 rounded-lg p-4 bg-red-50">
+                    <h3 className="text-sm font-semibold text-red-800 mb-1">Danger Zone</h3>
+                    <p className="text-[12px] text-red-600 mb-4">Permanently delete this agent and all its conversations. This action cannot be undone.</p>
+                    {deleteConfirmAgent ? (
+                      <div className="space-y-3">
+                        <p className="text-[12px] font-semibold text-red-700">Are you sure? This will delete all conversations.</p>
+                        <div className="flex gap-2">
+                          <button onClick={() => setDeleteConfirmAgent(false)}
+                            className="flex-1 rounded-lg border border-slate-200 py-2 text-sm font-medium text-slate-600 hover:bg-white transition-colors">
+                            Cancel
+                          </button>
+                          <button onClick={deleteAgentFull}
+                            className="flex-1 rounded-lg bg-red-600 py-2 text-sm font-semibold text-white hover:bg-red-700 transition-colors flex items-center justify-center gap-2">
+                            <Trash2 size={13} /> Delete Agent
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button onClick={() => setDeleteConfirmAgent(true)}
+                        className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-100 transition-colors flex items-center gap-2">
+                        <Trash2 size={13} /> Delete Agent
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

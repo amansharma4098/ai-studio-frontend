@@ -60,6 +60,9 @@ export const agentsApi = {
   run: (id: string, inputText: string) =>
     api.post(`/agents/${id}/run`, { input_text: inputText }),
   getRuns: (id: string) => api.get(`/agents/${id}/runs`),
+  getSkills: (id: string) => api.get(`/agents/${id}/skills`),
+  addSkill: (id: string, data: any) => api.post(`/agents/${id}/skills`, data),
+  removeSkill: (id: string, skillId: string) => api.delete(`/agents/${id}/skills/${skillId}`),
 }
 
 // ── Threads ──────────────────────────────────────────────────────
