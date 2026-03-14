@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://ai-studio-production-4b0f.up.railway.app'
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.stupidaistudio.com'
 
 export const api = axios.create({
   baseURL: `${API_URL}/api`,
