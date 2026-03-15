@@ -5,18 +5,16 @@ import { Plus, Pencil, X, Loader2, RefreshCw, Eye, EyeOff, ChevronDown } from 'l
 import { credentialsApi } from '@/lib/api'
 
 // ── Types ────────────────────────────────────────────────────────
-interface AuthType {
-  id: string
-  name: string
-  categories: { id: string; name: string; fields: FieldDef[] }[]
-}
-
 interface FieldDef {
   key: string
   label: string
   type: 'text' | 'password'
   required: boolean
-  placeholder?: string
+}
+
+interface AuthTypeConfig {
+  categories: string[]
+  fields: FieldDef[]
 }
 
 interface Credential {
@@ -31,6 +29,72 @@ interface Credential {
   modified_at: string
 }
 
+// ── Hardcoded Auth Types ─────────────────────────────────────────
+const AUTH_TYPES: Record<string, AuthTypeConfig> = {
+  'API Key': {
+    categories: ['Groq', 'OpenAI', 'Anthropic', 'HubSpot', 'Salesforce', 'Custom'],
+    fields: [
+      { key: 'api_key', label: 'API KEY', type: 'password', required: true },
+    ],
+  },
+  'OAuth2': {
+    categories: ['Google', 'GitHub', 'Slack', 'Microsoft'],
+    fields: [
+      { key: 'client_id', label: 'CLIENT ID', type: 'text', required: true },
+      { key: 'client_secret', label: 'CLIENT SECRET', type: 'password', required: true },
+      { key: 'redirect_uri', label: 'REDIRECT URI', type: 'text', required: false },
+    ],
+  },
+  'Basic Auth': {
+    categories: ['Custom', 'Jenkins', 'Jira', 'Confluence'],
+    fields: [
+      { key: 'username', label: 'USERNAME', type: 'text', required: true },
+      { key: 'password', label: 'PASSWORD', type: 'password', required: true },
+    ],
+  },
+  'Bearer Token': {
+    categories: ['Custom', 'REST API', 'Internal Service'],
+    fields: [
+      { key: 'token', label: 'BEARER TOKEN', type: 'password', required: true },
+    ],
+  },
+  'Database': {
+    categories: ['PostgreSQL', 'MySQL', 'MongoDB', 'Redis', 'Elasticsearch'],
+    fields: [
+      { key: 'connection_string', label: 'CONNECTION STRING', type: 'password', required: true },
+      { key: 'host', label: 'HOST', type: 'text', required: false },
+      { key: 'port', label: 'PORT', type: 'text', required: false },
+      { key: 'username', label: 'USERNAME', type: 'text', required: false },
+      { key: 'password', label: 'PASSWORD', type: 'password', required: false },
+      { key: 'database', label: 'DATABASE NAME', type: 'text', required: false },
+    ],
+  },
+  'AWS': {
+    categories: ['AWS S3', 'AWS Lambda', 'AWS SES', 'AWS General'],
+    fields: [
+      { key: 'access_key_id', label: 'ACCESS KEY ID', type: 'text', required: true },
+      { key: 'secret_access_key', label: 'SECRET ACCESS KEY', type: 'password', required: true },
+      { key: 'region', label: 'REGION', type: 'text', required: true },
+    ],
+  },
+  'SMTP': {
+    categories: ['Gmail', 'SendGrid', 'Mailgun', 'Custom SMTP'],
+    fields: [
+      { key: 'host', label: 'SMTP HOST', type: 'text', required: true },
+      { key: 'port', label: 'SMTP PORT', type: 'text', required: true },
+      { key: 'username', label: 'USERNAME', type: 'text', required: true },
+      { key: 'password', label: 'PASSWORD', type: 'password', required: true },
+    ],
+  },
+  'Webhook': {
+    categories: ['Slack', 'Discord', 'Teams', 'Custom'],
+    fields: [
+      { key: 'webhook_url', label: 'WEBHOOK URL', type: 'text', required: true },
+      { key: 'secret', label: 'SIGNING SECRET', type: 'password', required: false },
+    ],
+  },
+}
+
 // ── Helpers ──────────────────────────────────────────────────────
 function fmtDate(iso: string) {
   if (!iso) return '—'
@@ -38,21 +102,6 @@ function fmtDate(iso: string) {
     const d = new Date(iso)
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   } catch { return '—' }
-}
-
-/** Normalize auth-types response — could be array or object */
-function normalizeAuthTypes(raw: any): AuthType[] {
-  if (!raw) return []
-  if (Array.isArray(raw)) return raw
-  // Object shape: { "HubSpot": { fields: [...] }, "Groq": { fields: [...] } }
-  if (typeof raw === 'object') {
-    return Object.entries(raw).map(([key, value]: [string, any]) => ({
-      id: key,
-      name: value?.name || key,
-      categories: Array.isArray(value?.categories) ? value.categories : (value?.fields ? [{ id: 'default', name: 'Default', fields: Array.isArray(value.fields) ? value.fields : [] }] : []),
-    }))
-  }
-  return []
 }
 
 // ── Main Page ────────────────────────────────────────────────────
@@ -317,70 +366,36 @@ function AddEditModal({
   const isEdit = !!editId
 
   // Form state
-  const [name, setName] = useState('')
-  const [authType, setAuthType] = useState('')
-  const [authCategory, setAuthCategory] = useState('')
+  const [credName, setCredName] = useState('')
+  const [selectedAuthType, setSelectedAuthType] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState('')
   const [description, setDescription] = useState('')
-  const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
+  const [credentialValues, setCredentialValues] = useState<Record<string, string>>({})
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({})
-  const [fieldsVisible, setFieldsVisible] = useState(false)
-  const [authTypesLoading, setAuthTypesLoading] = useState(true)
+  const [submitted, setSubmitted] = useState(false)
 
-  // Fetch auth types on mount — normalize response shape
-  const { data: rawAuthTypes } = useQuery({
-    queryKey: ['auth-types'],
-    queryFn: () => credentialsApi.getAuthTypes().then(r => r.data),
-  })
-
-  const authTypes: AuthType[] = normalizeAuthTypes(rawAuthTypes)
-
-  useEffect(() => {
-    if (rawAuthTypes !== undefined) setAuthTypesLoading(false)
-  }, [rawAuthTypes])
-
-  // Categories for selected auth type
-  const selectedType = (authTypes ?? []).find(t => t.id === authType) ?? null
-  const categories = selectedType?.categories ?? []
-  const selectedCategory = (categories ?? []).find(c => c.id === authCategory) ?? null
-  const fields: FieldDef[] = selectedCategory?.fields ?? []
+  // Derived
+  const authConfig = selectedAuthType ? AUTH_TYPES[selectedAuthType] : null
+  const fields: FieldDef[] = authConfig?.fields ?? []
+  const categories: string[] = authConfig?.categories ?? []
 
   // Pre-fill on edit
   useEffect(() => {
     if (isEdit && editId) {
       const cred = (credentials ?? []).find(c => c.id === editId)
       if (cred) {
-        setName(cred.name)
-        setAuthType(cred.auth_type)
-        setAuthCategory(cred.auth_category)
+        setCredName(cred.name)
+        setSelectedAuthType(cred.auth_type)
+        setSelectedCategory(cred.auth_category)
         setDescription(cred.description || '')
       }
-      // Fetch existing values
       credentialsApi.getValues(editId).then(r => {
         if (r.data && typeof r.data === 'object') {
-          setFieldValues(r.data)
+          setCredentialValues(r.data)
         }
       }).catch(() => {})
     }
   }, [editId, isEdit, credentials])
-
-  // Reset category when auth type changes
-  useEffect(() => {
-    if (!isEdit) {
-      setAuthCategory('')
-      setFieldValues({})
-      setFieldsVisible(false)
-    }
-  }, [authType, isEdit])
-
-  // Animate fields in when both type + category selected
-  useEffect(() => {
-    if (authType && authCategory && (fields ?? []).length > 0) {
-      const t = setTimeout(() => setFieldsVisible(true), 50)
-      return () => clearTimeout(t)
-    } else {
-      setFieldsVisible(false)
-    }
-  }, [authType, authCategory, fields.length])
 
   const saveMut = useMutation({
     mutationFn: (data: any) =>
@@ -388,18 +403,36 @@ function AddEditModal({
     onSuccess: () => onSaved(),
   })
 
+  // Validation
+  const requiredFieldsMissing = fields
+    .filter(f => f.required)
+    .some(f => !credentialValues[f.key]?.trim())
+
+  const isValid =
+    credName.trim() !== '' &&
+    selectedAuthType !== '' &&
+    selectedCategory !== '' &&
+    !requiredFieldsMissing
+
   const handleSubmit = () => {
+    setSubmitted(true)
+    if (!isValid) return
     saveMut.mutate({
-      name,
-      auth_type: authType,
-      auth_category: authCategory,
+      name: credName,
+      auth_type: selectedAuthType,
+      auth_category: selectedCategory,
       description,
-      values: fieldValues,
+      credential_values: credentialValues,
     })
   }
 
   const togglePasswordVis = (key: string) =>
     setShowPasswords(p => ({ ...p, [key]: !p[key] }))
+
+  const inputBorderClass = (hasError: boolean) =>
+    hasError
+      ? 'border-red-400 focus:border-red-500 focus:ring-red-500'
+      : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
@@ -419,122 +452,125 @@ function AddEditModal({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-          {authTypesLoading ? (
-            <div className="py-10 text-center">
-              <Loader2 size={20} className="mx-auto animate-spin text-slate-400" />
-              <p className="mt-2 text-sm text-slate-400">Loading auth types...</p>
-            </div>
-          ) : (
-            <>
-              {/* Row 1: Name | Auth Type | Category */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
-                    NAME <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    placeholder="e.g. Production API Key"
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
-                    AUTH TYPE <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    value={authType}
-                    onChange={e => setAuthType(e.target.value)}
-                  >
-                    <option value="">Select auth type...</option>
-                    {(authTypes ?? []).map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
-                    AUTHTYPE CATEGORY <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
-                    value={authCategory}
-                    onChange={e => setAuthCategory(e.target.value)}
-                    disabled={!authType}
-                  >
-                    <option value="">Select category...</option>
-                    {(categories ?? []).map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+          {/* Row 1: Name (full width) */}
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+              NAME <span className="text-red-500">*</span>
+            </label>
+            <input
+              className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-1 ${inputBorderClass(submitted && !credName.trim())}`}
+              placeholder="e.g. Production API Key"
+              value={credName}
+              onChange={e => setCredName(e.target.value)}
+            />
+          </div>
 
-              {/* Row 2: Description */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                    DESCRIPTION
-                  </label>
-                  <span className={`text-[10px] font-medium ${description.length > 255 ? 'text-red-500' : 'text-slate-400'}`}>
-                    {description.length}/255
-                  </span>
-                </div>
-                <textarea
-                  rows={3}
-                  maxLength={255}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 resize-none focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  placeholder="Optional description for this credential..."
-                  value={description}
-                  onChange={e => setDescription(e.target.value)}
-                />
-              </div>
-
-              {/* Dynamic Fields */}
-              {(fields ?? []).length > 0 && (
-                <div
-                  className="space-y-4 transition-all duration-300 ease-out"
-                  style={{
-                    opacity: fieldsVisible ? 1 : 0,
-                    transform: fieldsVisible ? 'translateY(0)' : 'translateY(8px)',
+          {/* Row 2: Auth Type | Category (side by side) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                AUTH TYPE <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <select
+                  className={`w-full appearance-none rounded-lg border bg-white px-3 py-2 pr-8 text-sm text-slate-800 focus:outline-none focus:ring-1 ${inputBorderClass(submitted && !selectedAuthType)}`}
+                  value={selectedAuthType}
+                  onChange={e => {
+                    setSelectedAuthType(e.target.value)
+                    setSelectedCategory('')
+                    setCredentialValues({})
                   }}
                 >
-                  <div className="border-t border-slate-100 pt-4">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">
-                      {selectedType?.name ?? ''} / {selectedCategory?.name ?? ''} Fields
-                    </p>
-                  </div>
-                  {(fields ?? []).map(field => (
-                    <div key={field.key}>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
-                        {field.label}
-                        {field.required && <span className="text-red-500 ml-0.5">*</span>}
-                      </label>
-                      <div className="relative">
-                        <input
-                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 pr-10"
-                          type={field.type === 'password' && !showPasswords[field.key] ? 'password' : 'text'}
-                          placeholder={field.placeholder ?? ''}
-                          value={fieldValues[field.key] ?? ''}
-                          onChange={e => setFieldValues(v => ({ ...v, [field.key]: e.target.value }))}
-                        />
-                        {field.type === 'password' && (
-                          <button
-                            type="button"
-                            onClick={() => togglePasswordVis(field.key)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                          >
-                            {showPasswords[field.key] ? <EyeOff size={14} /> : <Eye size={14} />}
-                          </button>
-                        )}
-                      </div>
-                    </div>
+                  <option value="">Select auth type...</option>
+                  {Object.keys(AUTH_TYPES).map(type => (
+                    <option key={type} value={type}>{type}</option>
                   ))}
-                </div>
-              )}
-            </>
+                </select>
+                <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                CATEGORY <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <select
+                  className={`w-full appearance-none rounded-lg border bg-white px-3 py-2 pr-8 text-sm text-slate-800 focus:outline-none focus:ring-1 disabled:bg-slate-50 disabled:text-slate-400 ${inputBorderClass(submitted && !selectedCategory)}`}
+                  value={selectedCategory}
+                  onChange={e => setSelectedCategory(e.target.value)}
+                  disabled={!selectedAuthType}
+                >
+                  <option value="">Select category...</option>
+                  {categories.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+                <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              </div>
+            </div>
+          </div>
+
+          {/* Row 3: Description (full width) */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                DESCRIPTION
+              </label>
+              <span className={`text-[10px] font-medium ${description.length > 255 ? 'text-red-500' : 'text-slate-400'}`}>
+                {description.length}/255
+              </span>
+            </div>
+            <textarea
+              rows={3}
+              maxLength={255}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 resize-none focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              placeholder="Optional description for this credential..."
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+            />
+          </div>
+
+          {/* Row 4: Dynamic Credential Fields */}
+          {selectedAuthType && fields.length > 0 && (
+            <div className="space-y-4">
+              <div className="border-t border-slate-100 pt-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">
+                  CREDENTIALS — {selectedAuthType}{selectedCategory ? ` / ${selectedCategory}` : ''}
+                </p>
+              </div>
+              {fields.map(field => {
+                const hasError = submitted && field.required && !credentialValues[field.key]?.trim()
+                return (
+                  <div key={field.key}>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                      {field.label}
+                      {field.required && <span className="text-red-500 ml-0.5">*</span>}
+                    </label>
+                    <div className="relative">
+                      <input
+                        className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-1 pr-10 ${inputBorderClass(hasError)}`}
+                        type={field.type === 'password' && !showPasswords[field.key] ? 'password' : 'text'}
+                        placeholder={`Enter ${field.label.toLowerCase()}...`}
+                        value={credentialValues[field.key] ?? ''}
+                        onChange={e => setCredentialValues(prev => ({ ...prev, [field.key]: e.target.value }))}
+                      />
+                      {field.type === 'password' && (
+                        <button
+                          type="button"
+                          onClick={() => togglePasswordVis(field.key)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                        >
+                          {showPasswords[field.key] ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      )}
+                    </div>
+                    {hasError && (
+                      <p className="mt-1 text-[10px] text-red-500">This field is required</p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
 
@@ -550,7 +586,7 @@ function AddEditModal({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={saveMut.isPending || !name.trim() || !authType || !authCategory}
+            disabled={saveMut.isPending}
             className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {saveMut.isPending
