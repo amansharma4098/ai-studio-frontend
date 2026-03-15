@@ -9,7 +9,9 @@ import { useAuthStore } from '@/store/authStore'
 export default function SignupPage() {
   const router = useRouter()
   const setAuth = useAuthStore(s => s.setAuth)
-  const [form, setForm] = useState({ name: '', email: '', password: '', organization: '' })
+  const [form, setForm] = useState({ name: '', email: '', password: '' })
+  const [accountType, setAccountType] = useState<'individual' | 'organisation'>('individual')
+  const [orgName, setOrgName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showPass, setShowPass] = useState(false)
@@ -19,9 +21,19 @@ export default function SignupPage() {
       setError('Please fill in all required fields')
       return
     }
+    if (accountType === 'organisation' && !orgName.trim()) {
+      setError('Organisation name is required')
+      return
+    }
     setLoading(true); setError('')
     try {
-      const { data } = await authApi.signup(form)
+      const { data } = await authApi.signup({
+        name: form.name,
+        email: form.email,
+        password: form.password,
+        account_type: accountType,
+        org_name: accountType === 'organisation' ? orgName : null,
+      })
       localStorage.setItem('token', data.access_token)
       setAuth(data.user, data.access_token)
       router.push('/dashboard')
@@ -139,6 +151,33 @@ export default function SignupPage() {
             </div>
 
             <div className="space-y-4">
+              {/* Account Type Selector */}
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-slate-600">Account Type</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button type="button" onClick={() => setAccountType('individual')}
+                    className={`flex flex-col items-center gap-1.5 rounded-xl border-2 p-4 transition-all ${
+                      accountType === 'individual'
+                        ? 'border-emerald-500 bg-emerald-50/60'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}>
+                    <span className="text-2xl">👤</span>
+                    <span className="text-sm font-semibold text-slate-700">Individual</span>
+                    <span className="text-[11px] text-slate-400">Personal projects</span>
+                  </button>
+                  <button type="button" onClick={() => setAccountType('organisation')}
+                    className={`flex flex-col items-center gap-1.5 rounded-xl border-2 p-4 transition-all ${
+                      accountType === 'organisation'
+                        ? 'border-emerald-500 bg-emerald-50/60'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}>
+                    <span className="text-2xl">🏢</span>
+                    <span className="text-sm font-semibold text-slate-700">Organisation</span>
+                    <span className="text-[11px] text-slate-400">Teams &amp; businesses</span>
+                  </button>
+                </div>
+              </div>
+
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-slate-600">Full Name *</label>
                 <input type="text" className="auth-input" placeholder="Alex Chen"
@@ -149,11 +188,13 @@ export default function SignupPage() {
                 <input type="email" className="auth-input" placeholder="you@company.com"
                   value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
               </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-600">Organization</label>
-                <input type="text" className="auth-input" placeholder="Contoso Ltd"
-                  value={form.organization} onChange={e => setForm({ ...form, organization: e.target.value })} />
-              </div>
+              {accountType === 'organisation' && (
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-600">Organisation Name *</label>
+                  <input type="text" className="auth-input" placeholder="Acme Ltd"
+                    value={orgName} onChange={e => setOrgName(e.target.value)} />
+                </div>
+              )}
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-slate-600">Password *</label>
                 <div className="relative">
