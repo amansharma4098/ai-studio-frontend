@@ -79,6 +79,12 @@ export const threadsApi = {
 export const skillsApi = {
   getCatalog: () => api.get('/skills/catalog'),
   list: () => api.get('/skills/'),
+  mySkills: () => api.get('/skills/my-skills'),
+  create: (data: any) => api.post('/skills/create', data),
+  update: (id: string, data: any) => api.put(`/skills/${id}`, data),
+  delete: (id: string) => api.delete(`/skills/${id}`),
+  test: (id: string, payload: any) => api.post(`/skills/${id}/test`, payload),
+  install: (id: string) => api.post(`/skills/${id}/install`),
 }
 
 // ── Credentials ───────────────────────────────────────────────────
