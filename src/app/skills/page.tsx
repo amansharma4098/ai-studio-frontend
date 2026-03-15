@@ -4,10 +4,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import {
   Search, CheckCircle, AlertTriangle, Download, Trash2, Pencil, Play,
-  X, Loader2, Globe, Lock, Plus, ChevronRight,
+  X, Loader2, Globe, Lock, Plus, ChevronRight, Upload,
 } from 'lucide-react'
 import { credentialsApi, skillsApi } from '@/lib/api'
 import { useToast } from '@/components/ui/toast'
+import yaml from 'js-yaml'
 
 // ── Types ────────────────────────────────────────────────────────
 interface CustomSkill {
@@ -152,6 +153,93 @@ const CONFIG_TEMPLATES: Record<string, string> = {
   }, null, 2),
 }
 
+// ── OpenAPI Parsing ──────────────────────────────────────────────
+interface ParsedEndpoint {
+  method: string
+  path: string
+  summary: string
+  parameters: any[]
+  requestBody: any
+  security: any[]
+}
+
+const METHOD_COLORS: Record<string, string> = {
+  GET: 'bg-emerald-100 text-emerald-700',
+  POST: 'bg-sky-100 text-sky-700',
+  PUT: 'bg-amber-100 text-amber-700',
+  DELETE: 'bg-red-100 text-red-700',
+  PATCH: 'bg-purple-100 text-purple-700',
+}
+
+function parseOpenAPISpec(specText: string): { spec: any; endpoints: ParsedEndpoint[] } {
+  let spec: any
+  try {
+    spec = JSON.parse(specText)
+  } catch {
+    spec = yaml.load(specText) as any
+  }
+  if (!spec || !spec.paths) throw new Error('Invalid spec: no paths found')
+
+  const endpoints: ParsedEndpoint[] = []
+  for (const [path, methods] of Object.entries(spec.paths as Record<string, any>)) {
+    for (const [method, detail] of Object.entries(methods as Record<string, any>)) {
+      if (['get', 'post', 'put', 'delete', 'patch'].includes(method)) {
+        endpoints.push({
+          method: method.toUpperCase(),
+          path,
+          summary: detail.summary || detail.description || '',
+          parameters: detail.parameters || [],
+          requestBody: detail.requestBody || null,
+          security: detail.security || spec.security || [],
+        })
+      }
+    }
+  }
+  return { spec, endpoints }
+}
+
+function detectAuthHeaders(securitySchemes: any): Record<string, string> {
+  if (!securitySchemes) return {}
+  for (const [, scheme] of Object.entries(securitySchemes as Record<string, any>)) {
+    if (scheme.type === 'http' && scheme.scheme === 'bearer') {
+      return { Authorization: 'Bearer {{credential}}' }
+    }
+    if (scheme.type === 'apiKey') {
+      return { [scheme.name || 'X-API-Key']: '{{credential}}' }
+    }
+    if (scheme.type === 'oauth2') {
+      return { Authorization: 'Bearer {{credential}}' }
+    }
+  }
+  return {}
+}
+
+function generateBodyTemplate(requestBody: any): string {
+  if (!requestBody) return '{}'
+  const content = requestBody.content
+  if (!content) return '{}'
+  const jsonContent = content['application/json']
+  if (!jsonContent?.schema) return '{}'
+  return JSON.stringify(schemaToExample(jsonContent.schema), null, 2)
+}
+
+function schemaToExample(schema: any): any {
+  if (!schema) return {}
+  if (schema.example !== undefined) return schema.example
+  if (schema.type === 'string') return schema.default || 'string'
+  if (schema.type === 'number' || schema.type === 'integer') return schema.default || 0
+  if (schema.type === 'boolean') return schema.default || false
+  if (schema.type === 'array') return [schemaToExample(schema.items || {})]
+  if (schema.type === 'object' || schema.properties) {
+    const obj: any = {}
+    for (const [key, prop] of Object.entries((schema.properties || {}) as Record<string, any>)) {
+      obj[key] = schemaToExample(prop)
+    }
+    return obj
+  }
+  return {}
+}
+
 // ── Main Component ───────────────────────────────────────────────
 export default function SkillsPage() {
   const [mounted, setMounted] = useState(false)
@@ -188,6 +276,16 @@ export default function SkillsPage() {
   // Scraper specific fields
   const [scraperUrl, setScraperUrl] = useState('https://example.com')
   const [scraperSelector, setScraperSelector] = useState('.article-content')
+
+  // OpenAPI import state
+  const [restConfigMode, setRestConfigMode] = useState<'manual' | 'openapi'>('manual')
+  const [openApiSpec, setOpenApiSpec] = useState('')
+  const [parsedEndpoints, setParsedEndpoints] = useState<ParsedEndpoint[]>([])
+  const [parsedSpec, setParsedSpec] = useState<any>(null)
+  const [selectedEndpoints, setSelectedEndpoints] = useState<Set<number>>(new Set())
+  const [parseError, setParseError] = useState('')
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [autoFilledFields, setAutoFilledFields] = useState<Set<string>>(new Set())
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -277,6 +375,100 @@ export default function SkillsPage() {
     setSqlQuery('SELECT * FROM users WHERE id = {{input}}')
     setScraperUrl('https://example.com')
     setScraperSelector('.article-content')
+    setRestConfigMode('manual')
+    setOpenApiSpec('')
+    setParsedEndpoints([])
+    setParsedSpec(null)
+    setSelectedEndpoints(new Set())
+    setParseError('')
+    setAutoFilledFields(new Set())
+  }
+
+  function handleParseSpec() {
+    setParseError('')
+    try {
+      const { spec, endpoints } = parseOpenAPISpec(openApiSpec)
+      setParsedSpec(spec)
+      setParsedEndpoints(endpoints)
+      setSelectedEndpoints(new Set())
+      if (endpoints.length === 0) setParseError('No endpoints found in spec')
+    } catch (e: any) {
+      setParseError(e.message || 'Failed to parse spec')
+      setParsedEndpoints([])
+      setParsedSpec(null)
+    }
+  }
+
+  function toggleEndpointSelection(idx: number) {
+    setSelectedEndpoints(prev => {
+      const next = new Set(prev)
+      if (next.has(idx)) next.delete(idx)
+      else next.add(idx)
+      return next
+    })
+  }
+
+  function applySelectedEndpoints() {
+    if (!parsedSpec || selectedEndpoints.size === 0) return
+    const indices = Array.from(selectedEndpoints)
+    const first = parsedEndpoints[indices[0]]
+    const baseUrl = parsedSpec.servers?.[0]?.url || ''
+    const authHeaders = detectAuthHeaders(parsedSpec.components?.securitySchemes)
+
+    setRestUrl(baseUrl + first.path)
+    setRestMethod(first.method)
+    setRestHeaders(JSON.stringify(
+      Object.keys(authHeaders).length > 0 ? authHeaders : {},
+      null, 2,
+    ))
+    setRestBody(generateBodyTemplate(first.requestBody))
+
+    if (!skillName && parsedSpec.info?.title) {
+      setSkillName(parsedSpec.info.title)
+    }
+    if (!description && first.summary) {
+      setDescription(first.summary)
+    }
+
+    setAutoFilledFields(new Set(['url', 'method', 'headers', 'body']))
+    setRestConfigMode('manual')
+    toast('Endpoint imported — review the fields below', 'success')
+  }
+
+  function handleSpecFileDrop(e: React.DragEvent<HTMLTextAreaElement>) {
+    e.preventDefault()
+    setIsDragOver(false)
+    const file = e.dataTransfer.files[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      setOpenApiSpec(text)
+      // auto-parse after drop
+      try {
+        const { spec, endpoints } = parseOpenAPISpec(text)
+        setParsedSpec(spec)
+        setParsedEndpoints(endpoints)
+        setSelectedEndpoints(new Set())
+        setParseError('')
+        if (endpoints.length === 0) setParseError('No endpoints found in spec')
+      } catch (err: any) {
+        setParseError(err.message || 'Failed to parse spec')
+      }
+    }
+    reader.readAsText(file)
+  }
+
+  function handleSpecFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      setOpenApiSpec(text)
+    }
+    reader.readAsText(file)
+    e.target.value = ''
   }
 
   function buildConfigFromFields(type: string): string {
@@ -729,51 +921,186 @@ export default function SkillsPage() {
                 {/* REST API config */}
                 {skillType === 'REST API' && (
                   <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-                    <div>
-                      <label className="block text-[11px] font-medium text-slate-500 mb-1">URL</label>
-                      <input
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                        placeholder="https://api.example.com/data"
-                        value={restUrl}
-                        onChange={e => setRestUrl(e.target.value)}
-                      />
+                    {/* Mode toggle */}
+                    <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                      <button onClick={() => setRestConfigMode('manual')}
+                        className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+                          restConfigMode === 'manual' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                        }`}>
+                        Manual Setup
+                      </button>
+                      <button onClick={() => setRestConfigMode('openapi')}
+                        className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+                          restConfigMode === 'openapi' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                        }`}>
+                        Import OpenAPI Spec
+                      </button>
                     </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-slate-500 mb-1">Method</label>
-                      <div className="flex gap-2">
-                        {['GET', 'POST', 'PUT', 'DELETE'].map(m => (
-                          <button
-                            key={m}
-                            onClick={() => setRestMethod(m)}
-                            className={`rounded-lg px-4 py-1.5 text-xs font-bold transition-all ${
-                              restMethod === m
-                                ? 'bg-emerald-600 text-white'
-                                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                            }`}
-                          >
-                            {m}
-                          </button>
-                        ))}
+
+                    {/* ── Manual mode ── */}
+                    {restConfigMode === 'manual' && (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="flex items-center gap-2 text-[11px] font-medium text-slate-500 mb-1">
+                            URL
+                            {autoFilledFields.has('url') && (
+                              <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-600">Parsed from spec</span>
+                            )}
+                          </label>
+                          <input
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            placeholder="https://api.example.com/data"
+                            value={restUrl}
+                            onChange={e => { setRestUrl(e.target.value); setAutoFilledFields(p => { const n = new Set(p); n.delete('url'); return n }) }}
+                          />
+                        </div>
+                        <div>
+                          <label className="flex items-center gap-2 text-[11px] font-medium text-slate-500 mb-1">
+                            Method
+                            {autoFilledFields.has('method') && (
+                              <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-600">Parsed from spec</span>
+                            )}
+                          </label>
+                          <div className="flex gap-2">
+                            {['GET', 'POST', 'PUT', 'DELETE'].map(m => (
+                              <button
+                                key={m}
+                                onClick={() => { setRestMethod(m); setAutoFilledFields(p => { const n = new Set(p); n.delete('method'); return n }) }}
+                                className={`rounded-lg px-4 py-1.5 text-xs font-bold transition-all ${
+                                  restMethod === m
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                                }`}
+                              >
+                                {m}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="flex items-center gap-2 text-[11px] font-medium text-slate-500 mb-1">
+                            Headers (JSON)
+                            {autoFilledFields.has('headers') && (
+                              <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-600">Parsed from spec</span>
+                            )}
+                          </label>
+                          <textarea
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            rows={3}
+                            value={restHeaders}
+                            onChange={e => { setRestHeaders(e.target.value); setAutoFilledFields(p => { const n = new Set(p); n.delete('headers'); return n }) }}
+                          />
+                        </div>
+                        <div>
+                          <label className="flex items-center gap-2 text-[11px] font-medium text-slate-500 mb-1">
+                            Body Template
+                            {autoFilledFields.has('body') && (
+                              <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-600">Parsed from spec</span>
+                            )}
+                          </label>
+                          <textarea
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            rows={3}
+                            value={restBody}
+                            onChange={e => { setRestBody(e.target.value); setAutoFilledFields(p => { const n = new Set(p); n.delete('body'); return n }) }}
+                          />
+                        </div>
                       </div>
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-slate-500 mb-1">Headers (JSON)</label>
-                      <textarea
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                        rows={3}
-                        value={restHeaders}
-                        onChange={e => setRestHeaders(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-slate-500 mb-1">Body Template</label>
-                      <textarea
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                        rows={3}
-                        value={restBody}
-                        onChange={e => setRestBody(e.target.value)}
-                      />
-                    </div>
+                    )}
+
+                    {/* ── OpenAPI Import mode ── */}
+                    {restConfigMode === 'openapi' && (
+                      <div className="space-y-3">
+                        <textarea
+                          className={`w-full min-h-[192px] rounded-lg border-2 px-4 py-3 text-sm font-mono text-slate-800 placeholder:text-slate-400 transition-colors focus:outline-none focus:ring-1 focus:ring-emerald-500 ${
+                            isDragOver
+                              ? 'border-emerald-500 bg-emerald-50/50'
+                              : 'border-slate-200 bg-white focus:border-emerald-500'
+                          }`}
+                          placeholder={`Paste your OpenAPI/Swagger spec here (JSON or YAML)\n\nExample:\n{\n  "openapi": "3.0.0",\n  "info": { "title": "My API" },\n  "paths": {\n    "/users": {\n      "get": {\n        "summary": "Get all users",\n        "parameters": [...]\n      }\n    }\n  }\n}`}
+                          value={openApiSpec}
+                          onChange={e => setOpenApiSpec(e.target.value)}
+                          onDragOver={e => { e.preventDefault(); setIsDragOver(true) }}
+                          onDragLeave={() => setIsDragOver(false)}
+                          onDrop={handleSpecFileDrop}
+                        />
+
+                        <div className="flex items-center gap-3">
+                          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+                            <Upload size={12} />
+                            Upload .json / .yaml file
+                            <input type="file" accept=".json,.yaml,.yml" className="hidden" onChange={handleSpecFileUpload} />
+                          </label>
+                          <span className="text-[10px] text-slate-400">or drag &amp; drop onto the textarea</span>
+                        </div>
+
+                        <button
+                          onClick={handleParseSpec}
+                          disabled={!openApiSpec.trim()}
+                          className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          Parse Spec
+                        </button>
+
+                        {parseError && (
+                          <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5">
+                            <AlertTriangle size={13} className="mt-0.5 text-red-500 shrink-0" />
+                            <p className="text-xs text-red-600">{parseError}</p>
+                          </div>
+                        )}
+
+                        {/* Parsed endpoints list */}
+                        {parsedEndpoints.length > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-xs font-semibold text-slate-700">
+                                Select endpoints
+                                <span className="ml-1.5 text-[10px] font-normal text-slate-400">({parsedEndpoints.length} found)</span>
+                              </p>
+                              {selectedEndpoints.size > 0 && (
+                                <button
+                                  onClick={applySelectedEndpoints}
+                                  className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700 transition-colors"
+                                >
+                                  <CheckCircle size={11} /> Apply Selected
+                                </button>
+                              )}
+                            </div>
+                            <div className="max-h-[280px] overflow-auto rounded-lg border border-slate-200">
+                              {parsedEndpoints.map((ep, idx) => {
+                                const isSelected = selectedEndpoints.has(idx)
+                                return (
+                                  <button
+                                    key={`${ep.method}-${ep.path}`}
+                                    onClick={() => toggleEndpointSelection(idx)}
+                                    className={`flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2.5 text-left transition-colors last:border-b-0 ${
+                                      isSelected ? 'bg-emerald-50' : 'bg-white hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      readOnly
+                                      className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 accent-emerald-600"
+                                    />
+                                    <span className={`inline-flex min-w-[52px] items-center justify-center rounded px-2 py-0.5 text-[10px] font-bold ${METHOD_COLORS[ep.method] || 'bg-slate-100 text-slate-700'}`}>
+                                      {ep.method}
+                                    </span>
+                                    <span className="font-mono text-xs text-slate-700">{ep.path}</span>
+                                    {ep.summary && (
+                                      <>
+                                        <span className="text-slate-300">—</span>
+                                        <span className="truncate text-[11px] text-slate-500">{ep.summary}</span>
+                                      </>
+                                    )}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
